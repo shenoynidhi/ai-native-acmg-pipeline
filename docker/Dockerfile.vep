@@ -1,0 +1,60 @@
+# docker/Dockerfile.vep
+#
+# VEP annotation container — built on the official Ensembl VEP image
+# Adds LOFTEE, SpliceAI, dbNSFP plugin Perl modules
+# Database files are NOT baked in — mounted as volumes at runtime
+#
+# Build: docker build -f docker/Dockerfile.vep -t acmg-vep .
+# ---------------------------------------------------------------------------
+
+FROM ensemblorg/ensembl-vep:release_112
+
+# Note: We use release_112 as a base because release_115 is not yet on Docker Hub.
+# The cache version (115) is passed via --cache_version flag at runtime.
+# VEP is backward-compatible with newer cache versions when run with --cache_version.
+# If release_115 becomes available, update this line and remove --cache_version flag.
+
+LABEL maintainer="acmg-pipeline"
+LABEL description="VEP 112 container with LOFTEE, SpliceAI, dbNSFP plugins"
+
+USER root
+
+# ---------------------------------------------------------------------------
+# Additional Perl modules required by plugins
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libdbi-perl \
+    libdbd-mysql-perl \
+    libjson-perl \
+    libwww-perl \
+    libbio-db-hts-perl \
+    cpanminus \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Bio::DB::BigFile for LOFTEE gerp bigwig support
+RUN cpanm --notest Bio::DB::BigFile || echo "BigFile install failed — LOFTEE gerp may not work"
+
+# ---------------------------------------------------------------------------
+# Plugin Perl modules
+# The .pm files from your .vep/Plugins/ directory are copied in.
+# Database files (dbNSFP gz, SpliceAI vcf.gz etc.) are mounted at runtime.
+# ---------------------------------------------------------------------------
+COPY docker/vep_plugins/ /opt/vep/.vep/Plugins/
+
+# ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
+ENV VEP_DATA_DIR=/data/vep
+ENV VEP_BINARY=/opt/vep/src/ensembl-vep/vep
+ENV VEP_PERL=/usr/bin/perl
+
+# ---------------------------------------------------------------------------
+# Entrypoint — this container is called by the pipeline container via
+# subprocess (docker exec or a shared Unix socket). It doesn't run a server.
+# In production this becomes a sidecar or init container.
+# ---------------------------------------------------------------------------
+USER vep
+ENTRYPOINT ["/opt/vep/src/ensembl-vep/vep"]
+CMD ["--help"]
+

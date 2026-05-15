@@ -1,0 +1,43 @@
+# docker/Dockerfile.api
+#
+# API container — thin FastAPI layer only.
+# Delegates all heavy work to the pipeline container via internal HTTP or
+# shared volume + job queue (Celery/Redis).
+#
+# Build: docker build -f docker/Dockerfile.api -t acmg-api .
+# ---------------------------------------------------------------------------
+
+FROM python:3.11-slim-bookworm
+
+LABEL maintainer="acmg-pipeline"
+LABEL description="ACMG pipeline API — FastAPI + Uvicorn"
+
+WORKDIR /app
+
+# Only install API dependencies (subset of full requirements)
+COPY requirements.txt .
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn[standard] \
+    python-multipart \
+    pydantic \
+    celery \
+    redis \
+    loguru \
+    python-dotenv \
+    && pip install --no-cache-dir -r requirements.txt
+
+COPY src/ ./src/
+COPY .env.docker .env
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV OUTPUT_DIR=/data/output
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=3s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+
