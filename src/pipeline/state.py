@@ -64,8 +64,21 @@ class VariantState(TypedDict):
 
     # Path to input VCF (set by API / runner before invoking the graph)
     proband_vcf_path:  str
-    genome_build:      str         # "GRCh38" or "GRCh37"
 
+    # Trio mode — optional parental VCFs (None = solo mode)
+    parent1_vcf_path:  Optional[str]   # typically maternal VCF
+    parent2_vcf_path:  Optional[str]   # typically paternal VCF
+    trio_mode:         bool            # True if both parental VCFs provided
+    proband_sex: Optional[str]   # "male" | "female" | "unknown"
+    parent1_genotype:  Optional[str]   # GT at this locus from parent1 VCF e.g. "0/1"
+    parent2_genotype:  Optional[str]   # GT at this locus from parent2 VCF e.g. "0/0"
+    denovo_status:     Optional[str]   # "confirmed" | "possible" | "excluded" | "unknown"
+    genome_build:      str         # "GRCh38" or "GRCh37"
+    proband_bam_path:  Optional[str]
+    parent1_bam_path:  Optional[str]
+    parent2_bam_path:  Optional[str]
+    parsed_variants: Optional[list]   # all variants from VEP TSV; set by post_process_node
+    annotated_tsv:   Optional[str]    # path to VEP TSV output; set by vep_runner_node
     # -------------------------------------------------------------------------
     # Phase 1 — variant identifiers  (populated by post_process_node)
     # -------------------------------------------------------------------------
@@ -76,6 +89,11 @@ class VariantState(TypedDict):
     hgvsp:             Optional[str] # e.g. "NP_009225.1:p.Arg1443Ter"
     consequence:       str           # VEP most severe: "stop_gained", "missense_variant", etc.
     protein_position:  Optional[int] # amino-acid position (None for non-coding)
+    amino_acid_change:        Optional[str]   # e.g. "Arg/Trp" from VEP
+    repeat_region:            bool            # True if VEP flags low-complexity/repeat
+    gene_clingen_mechanism:   Optional[str]   # e.g. "loss of function" from ClinGen CSV
+    gnomad_mis_z:             Optional[float] # gnomAD missense Z-score
+    gnomad_oe_mis:            Optional[float] # gnomAD observed/expected missense
     exon_number:       Optional[str] # e.g. "15/23"  (exon 15 of 23 total)
     intron_number:     Optional[str] # e.g. "14/22"
 
@@ -136,9 +154,9 @@ class VariantState(TypedDict):
     # -------------------------------------------------------------------------
     # Phase 7 — phasing  (populated by phasing_node using WhatsHap)
     # -------------------------------------------------------------------------
-    phase_status:     str            # "compound_het_trans" | "compound_het_cis" |
+    phase_status:     Optional[str]            # "compound_het_trans" | "compound_het_cis" |
                                      # "unphased" | "not_applicable"
-    phase_confidence: str            # "HIGH" | "MEDIUM" | "LOW"
+    phase_confidence: Optional[str]            # "HIGH" | "MEDIUM" | "LOW"
     phase_partner:    Optional[str]  # variant_id of the compound-het partner, if any
 
     # -------------------------------------------------------------------------
@@ -157,17 +175,31 @@ class VariantState(TypedDict):
     preliminary_criteria_benign:     List[str]      # e.g. ["BS1"]
     conflict_flag:                   bool           # True if P and B criteria both present
     ba1_shortcircuit:                bool           # True if BA1 fired → skip debate
+    # Evidence aggregator output
+    all_criteria_pathogenic:    dict            # merged P criteria across all agents
+    all_criteria_benign:        dict            # merged B criteria across all agents
+    classification_rules_met:   list            # ACMG Table 5 rule IDs that fired
+    aggregator_notes:           Optional[str]  # human-readable evidence count summary
+
+    # Aggregator outputs (new fields)
+    pathogenic_counts:               Optional[dict]
+    benign_counts:                   Optional[dict]
+    unevaluated_criteria:            Optional[list]
 
     # -------------------------------------------------------------------------
     # Phase 10 — final classification  (populated by final_arbiter_node)
     # -------------------------------------------------------------------------
-    final_classification:      Optional[str]
-    # One of: "Pathogenic" | "Likely_Pathogenic" | "VUS" | "Likely_Benign" | "Benign"
 
+    # Debate layer outputs
+    pathogenic_advocate_result:      Optional[dict]
+    benign_advocate_result:          Optional[dict]
+    final_classification:            Optional[str]
+    evidence_summary:                Optional[str]
+    confidence:                      Optional[str]
+    recommended_followup:            Optional[str]
+    debate_notes:                    Optional[str]
+    unevaluated_criteria_report:     Optional[list]
     final_criteria_applied:    List[str]       # definitive list after debate
-    evidence_summary:          Optional[str]   # narrative paragraph for the report
-    confidence:                Optional[str]   # "HIGH" | "MEDIUM" | "LOW"
-    recommended_followup:      Optional[str]   # e.g. "Segregation study recommended"
     reclassification_conditions: Optional[str] # what new evidence would change the call
     all_citations:             List[str]       # merged citations from all agents
 
@@ -176,14 +208,18 @@ class VariantState(TypedDict):
     # -------------------------------------------------------------------------
     # Patient HPO terms — shared across all variants in a session.
     # Set once by hpo_nlp_node (from clinical notes) or supplied directly.
+    clinical_notes: Optional[str]   # raw free-text clinical notes; consumed by hpo_nlp_node
     patient_hpo_terms: List[Dict]
     # Each entry: {"hpo_id": "HP:0001250", "label": "Seizure", "present": True}
 
-    phenotype_score:         Optional[float]  # 0.0–1.0 match to patient HPO terms
+    phenotype_score: Optional[float]  # 0.0–1.0 match to patient HPO terms
+    hpo_matched_genes: list                # genes matching patient HPO
+    gene_orphanet_diseases: list                # Orphanet disease names for gene
+    alternate_molecular_diagnosis: Optional[str]       # another causative variant found
     matched_orphanet_disease: Optional[str]   # best-matching Orphanet disease name
-    orphanet_id:             Optional[str]    # e.g. "ORPHA:199"
-    zygosity_filter_status:  Optional[str]    # "RETAIN" | "DEPRIORITIZE" | "RETAIN_UNCONFIRMED"
-
+    orphanet_id: Optional[str]    # e.g. "ORPHA:199"
+    zygosity_filter_status: Optional[str]    # "RETAIN" | "DEPRIORITIZE" | "RETAIN_UNCONFIRMED"
+    phenotype_score_notes: Optional[str]   # human-readable explanation of score components
     # -------------------------------------------------------------------------
     # Internal routing flags  (set by detector / filter nodes, read by graph edges)
     # -------------------------------------------------------------------------
@@ -196,10 +232,17 @@ class VariantState(TypedDict):
 # ---------------------------------------------------------------------------
 
 def build_initial_state(
-    session_id:      str,
-    proband_vcf_path: str,
-    genome_build:    str = "GRCh38",
+    session_id:        str,
+    proband_vcf_path:  str,
+    genome_build:      str = "GRCh38",
     patient_hpo_terms: Optional[List[Dict]] = None,
+    parent1_vcf_path:  Optional[str] = None,
+    parent2_vcf_path:  Optional[str] = None,
+    proband_sex:       Optional[str] = None,
+    clinical_notes:    Optional[str] = None,
+    proband_bam_path:  Optional[str] = None,
+    parent1_bam_path:  Optional[str] = None,
+    parent2_bam_path:  Optional[str] = None,
 ) -> VariantState:
     """
     Return a VariantState pre-filled with safe defaults.
@@ -212,12 +255,25 @@ def build_initial_state(
         )
         result = VARIANT_GRAPH.invoke(state)
     """
+    trio_mode = (parent1_vcf_path is not None and parent2_vcf_path is not None)
     return VariantState(
         # --- session ---
         session_id        = session_id,
         warnings          = [],
         proband_vcf_path  = proband_vcf_path,
+        parent1_vcf_path  = None,
+        parent2_vcf_path  = None,
+        trio_mode         = trio_mode,
+        parent1_genotype  = None,
+        parent2_genotype  = None,
+        proband_sex = proband_sex or "unknown",
+        denovo_status     = None,
         genome_build      = genome_build,
+        proband_bam_path    = proband_bam_path,
+        parent1_bam_path    = parent1_bam_path,
+        parent2_bam_path    = parent2_bam_path,
+        parsed_variants = None,
+        annotated_tsv   = None,
 
         # --- variant identifiers (filled by post_process_node) ---
         variant_id        = "",
@@ -227,6 +283,11 @@ def build_initial_state(
         hgvsp             = None,
         consequence       = "",
         protein_position  = None,
+        amino_acid_change       = None,
+        repeat_region           = False,
+        gene_clingen_mechanism  = None,
+        gnomad_mis_z            = None,
+        gnomad_oe_mis           = None,
         exon_number       = None,
         intron_number     = None,
 
@@ -285,23 +346,40 @@ def build_initial_state(
         preliminary_criteria_benign     = [],
         conflict_flag                   = False,
         ba1_shortcircuit                = False,
+        all_criteria_pathogenic    = {},
+        all_criteria_benign        = {},
+        classification_rules_met   = [],
+        aggregator_notes           = None,
 
-        # --- final classification ---
-        final_classification        = None,
-        final_criteria_applied      = [],
-        evidence_summary            = None,
-        confidence                  = None,
-        recommended_followup        = None,
-        reclassification_conditions = None,
-        all_citations               = [],
 
+        # Aggregator outputs
+        pathogenic_counts =               None,
+        benign_counts =                   None,
+        unevaluated_criteria =            None,
+
+        # Debate layer outputs
+        pathogenic_advocate_result =          None,
+        benign_advocate_result =              None,
+        final_classification =                None,
+        final_criteria_applied =              [],
+        evidence_summary =                    None,
+        confidence =                          None,
+        recommended_followup =                None,
+        reclassification_conditions =         None,
+        debate_notes =                        None,
+        unevaluated_criteria_report =         None,
+        all_citations =                       [],
         # --- phenotype ---
+        clinical_notes = clinical_notes,
         patient_hpo_terms        = patient_hpo_terms or [],
         phenotype_score          = None,
         matched_orphanet_disease = None,
         orphanet_id              = None,
         zygosity_filter_status   = None,
-
+        hpo_matched_genes        = [],
+        gene_orphanet_diseases   = [],
+        alternate_molecular_diagnosis = None,
+        phenotype_score_notes = None,
         # --- routing flags ---
         validation_passed     = False,
         vep_already_annotated = False,

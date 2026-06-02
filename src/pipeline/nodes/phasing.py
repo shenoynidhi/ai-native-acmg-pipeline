@@ -29,28 +29,23 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from src.config import OUTPUT_DIR, OPTIONAL_DATABASE_PATHS, SAMTOOLS_BINARY
+from src.config import OUTPUT_DIR, OPTIONAL_DATABASE_PATHS, SAMTOOLS_BINARY, WHATSHAP_BINARY
 from src.pipeline.state import VariantState
 
 logger = logging.getLogger(__name__)
 
 _REFERENCE_FASTA = OPTIONAL_DATABASE_PATHS["reference_fasta"]
 
-
 def _whatshap_path() -> Optional[str]:
     """Return WhatsHap binary path or None if not installed."""
+    # Check config path first (env-var driven, works in Docker + pod)
+    if WHATSHAP_BINARY.exists():
+        return str(WHATSHAP_BINARY)
+    # Fall back to PATH
     path = shutil.which("whatshap")
     if path:
         return path
-    # Check common conda locations
-    for candidate in [
-        "/workspace/data/envs/acmg/bin/whatshap",
-        "/workspace/data/envs/bcftools_env/bin/whatshap",
-    ]:
-        if Path(candidate).exists():
-            return candidate
     return None
-
 
 def _index_vcf(vcf_path: Path, warnings: list) -> None:
     """Tabix-index a VCF.gz using bcftools from bcftools_env."""
@@ -111,8 +106,23 @@ def phasing_node(state: VariantState) -> dict:
             "phase_confidence":"LOW",
             "warnings":        warnings,
         }
+    
+    proband_bam = state.get("proband_bam_path")
 
-    ref_fasta = Path(_REFERENCE_FASTA)
+    if not proband_bam or not Path(proband_bam).exists():
+        warnings.append("PHASING_SKIP: No BAM provided — WhatsHap skipped.")
+        logger.info(f"[{session_id}] Phasing skipped — no BAM.")
+        return {
+            "warnings":     warnings,
+            "phase_status": "SKIPPED_NO_BAM",
+        }
+
+    # Resolve reference FASTA based on genome_build from state
+    genome_build = state.get("genome_build", "GRCh38")
+
+    ref_fasta_key = "reference_fasta_grch37" if genome_build == "GRCh37" else "reference_fasta"  # default GRCh38
+
+    ref_fasta = Path(OPTIONAL_DATABASE_PATHS.get(ref_fasta_key, ""))
     if not ref_fasta.exists():
         warnings.append(
             "PHASING_WARN: Reference FASTA not found — phasing skipped. "
@@ -141,6 +151,7 @@ def phasing_node(state: VariantState) -> dict:
         "--indels",                      # phase indels as well as SNVs
         "--distrust-genotypes",          # allow phasing to correct genotype errors
         str(input_vcf),
+        str(proband_bam),       # PHASEINPUT — required
     ]
 
     logger.info(f"[{session_id}] Running WhatsHap phase on {input_vcf.name}")
@@ -216,4 +227,4 @@ def phasing_node(state: VariantState) -> dict:
         "phase_status":     "unphased",        # compound_het detection happens in Agent 6
         "phase_confidence": phase_confidence,
         "warnings":         warnings,
-
+    }

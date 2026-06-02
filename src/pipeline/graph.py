@@ -45,99 +45,73 @@ def _stub(name: str):
     node.__name__ = name
     return node
 
-
-# --- Pre-processing stubs (Phase 3) -----------------------------------------
-# Replace with: src/pipeline/nodes/input_validation.py
-def validate_input_node(state: VariantState) -> dict:
-    """
-    STUB → Phase 3
-    Real implementation: validates VCF format, genome build, sample columns.
-    Sets validation_passed = True on success, raises ValueError on failure.
-    """
-    logger.debug("[STUB] validate_input_node")
-    return {"validation_passed": True, "warnings": list(state.get("warnings", []))}
-
-
-# Replace with: src/pipeline/nodes/annotation_detector.py
-detect_annotation_node = _stub("detect_annotation_node")
-# Real: inspects VCF header for CSQ/ANN fields → sets vep_already_annotated
-
-# Replace with: src/pipeline/nodes/vep_runner.py
-vep_runner_node = _stub("vep_runner_node")
-# Real: shells out to VEP via conda, writes annotated VCF to work_dir/vep_out/
-
-# Replace with: src/pipeline/nodes/prefilter.py
-prefilter_node = _stub("prefilter_node")
-# Real: bcftools filter on DP, GQ, AF; removes common variants above MAF threshold
-
-# Replace with: src/pipeline/nodes/phasing.py
-phasing_node = _stub("phasing_node")
-# Real: runs WhatsHap, sets phase_status / phase_confidence / phase_partner
-
-# Replace with: src/pipeline/nodes/post_processor.py
-post_process_node = _stub("post_process_node")
-# Real: parses VEP TSV output → populates all Phase 1–6 VariantState fields
-
+# --- Pre-processing nodes (Phase 3+4) — real implementations ----------------
+from src.pipeline.nodes.input_validation    import validate_input_node
+from src.pipeline.nodes.annotation_detector import detect_annotation_node
+from src.pipeline.nodes.vep_runner          import vep_runner_node
+from src.pipeline.nodes.prefilter           import prefilter_node
+from src.pipeline.nodes.phasing             import phasing_node
+from src.pipeline.nodes.post_process        import post_process_node
 
 # --- Agent stubs (Phase 6) ---------------------------------------------------
 # Replace with: src/agents/agent{N}_{name}.py
 
-agent1_node = _stub("agent1_population")
+from src.agents.agent1_population import agent1_population as agent1_node
 # Real: evaluates BA1, BS1, BS2, PM2 (population frequency criteria)
 
-agent2_node = _stub("agent2_consequence")
+from src.agents.agent2_consequence import agent2_consequence as agent2_node
 # Real: evaluates PVS1 (null variant / loss-of-function — 5-caveat decision tree)
 
-agent3_node = _stub("agent3_insilico")
+from src.agents.agent3_insilico    import agent3_insilico    as agent3_node
 # Real: evaluates PP3, BP4, BP7 (in-silico predictor consensus)
 
-agent4_node = _stub("agent4_database")
+from src.agents.agent4_database import agent4_database as agent4_node
 # Real: evaluates PS1, PS4, PP5, BP6 — uses RAG (ChromaDB ClinVar collection)
 
-agent5_node = _stub("agent5_functional")
+from src.agents.agent5_functional import agent5_functional as agent5_node
 # Real: evaluates PS3, BS3, PM1 — uses RAG (UniProt domain collection)
 
-agent6_node = _stub("agent6_segregation")
+from src.agents.agent6_segregation import agent6_segregation as agent6_node
 # Real: evaluates PP1, PM3, BP2, BS4 (segregation / phase evidence)
 
-agent7_node = _stub("agent7_denovo")
+from src.agents.agent7_denovo import agent7_denovo as agent7_node
 # Real: evaluates PS2, PM6 (de novo status — trio mode)
 
-agent8_node = _stub("agent8_gene_context")
+from src.agents.agent8_gene_context import agent8_gene_context as agent8_node
 # Real: evaluates PM4, PM5, PP2, BP1, BP3 — uses RAG + RepeatMasker
 
-agent9_node = _stub("agent9_phenotype")
+from src.agents.agent9_phenotype import agent9_phenotype as agent9_node
 # Real: evaluates PP4, BP5 (phenotype match to gene/disease)
 
 
 # --- Evidence aggregator stub (Phase 7) -------------------------------------
-evidence_aggregator_node = _stub("evidence_aggregator_node")
+from src.pipeline.nodes.evidence_aggregator import evidence_aggregator_node
 # Real: applies ACMG Table 5 combination rules → preliminary_classification,
 #       sets conflict_flag and ba1_shortcircuit
 
 
 # --- Debate stubs (Phase 8) -------------------------------------------------
-pathogenic_advocate_node = _stub("pathogenic_advocate_node")
+from src.pipeline.nodes.debate_pathogenic_advocate import debate_pathogenic_advocate_node as pathogenic_advocate_node
 # Real: LLM argues strongest pathogenic case from agent evidence
 
-benign_advocate_node = _stub("benign_advocate_node")
+from src.pipeline.nodes.debate_benign_advocate import debate_benign_advocate_node as benign_advocate_node
 # Real: LLM argues strongest benign case, rebuts pathogenic advocate
 
-final_arbiter_node = _stub("final_arbiter_node")
+from src.pipeline.nodes.debate_final_arbiter import debate_final_arbiter_node as final_arbiter_node
 # Real: LLM weighs debate, issues final_classification + evidence_summary
 
 
 # --- HPO / phenotype stubs (Phase 9) ----------------------------------------
-hpo_nlp_node = _stub("hpo_nlp_node")
+from src.pipeline.nodes.hpo_nlp import hpo_nlp_node as hpo_nlp_node 
 # Real: extracts HPO term IDs from clinical_notes free text using LLM
 
-hpo_matcher_node = _stub("hpo_matcher_node")
+from src.pipeline.nodes.hpo_matcher import hpo_matcher_node  as hpo_matcher_node
 # Real: matches patient HPO terms to gene-disease associations in HPO + Orphanet
 
-phenotype_scorer_node = _stub("phenotype_scorer_node")
+from src.pipeline.nodes.phenotype_scorer import phenotype_scorer_node as phenotype_scorer_node
 # Real: scores each variant's gene against patient HPO terms → phenotype_score
 
-zygosity_filter_node = _stub("zygosity_filter_node")
+from src.pipeline.nodes.zygosity_filter import zygosity_filter_node as zygosity_filter_node
 # Real: checks inheritance pattern vs zygosity → zygosity_filter_status
 
 
@@ -235,15 +209,23 @@ def _should_run_debate(state: VariantState) -> str:
     if state.get("ba1_shortcircuit"):
         logger.info(f"BA1 short-circuit for {state.get('variant_id')} — skipping debate.")
         return "skip_debate"
+    prelim = state.get("preliminary_classification", "VUS")
+    if prelim in ("Pathogenic", "Benign") and not state.get("conflict_flag"):
+        logger.info(f"No Conflict for {state.get('variant_id')} — skipping debate.")
+        return "skip_debate"
     return "run_debate"
 
-
 def _should_run_hpo_nlp(state: VariantState) -> str:
-    """Skip clinical NLP if HPO terms were already supplied by the caller."""
+    """
+    Run NLP only when raw clinical notes are provided and HPO terms haven't
+    been pre-supplied. If neither is available, skip — variants will be
+    flagged by hpo_matcher/phenotype_scorer with score=0.0.
+    """
     if state.get("patient_hpo_terms"):
         return "skip_nlp"
-    return "run_nlp"
-
+    if state.get("clinical_notes"):
+        return "run_nlp"
+    return "skip_nlp"  # neither provided — downstream nodes handle flagging
 
 # =============================================================================
 # GRAPH BUILDER

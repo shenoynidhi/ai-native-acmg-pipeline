@@ -33,6 +33,10 @@ def detect_annotation_node(state: VariantState) -> dict:
     Stops reading as soon as the first data line is reached (efficient).
     """
     session_id = state["session_id"]
+    # Runner sets this True for pass-2 invocations — respect it
+    if state.get("vep_already_annotated"):
+        logger.info(f"[{session_id}] vep_already_annotated=True — skipping VEP runner.")
+        return {"vep_already_annotated": True}
     vcf_path   = Path(state.get("filtered_vcf") or state["proband_vcf_path"])
 
     logger.info(f"[{session_id}] Checking for existing VEP annotation in {vcf_path.name}")

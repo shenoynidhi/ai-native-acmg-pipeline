@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ACMG Variant Report — {{ session_id }}</title>
+
+  <!-- DataTables -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css" />
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+
+  <style>
+    /* ── Design system ──────────────────────────────────────────────────── */
+    :root {
+      --ink:         #1a1a2e;
+      --ink-mid:     #444466;
+      --ink-light:   #888899;
+      --surface:     #f7f7fb;
+      --card:        #ffffff;
+      --border:      #e2e2ec;
+      --accent:      #1a237e;
+      --accent-soft: #e8eaf6;
+
+      --c-path:      #b71c1c;
+      --c-path-bg:   #ffebee;
+      --c-path-bd:   #ef9a9a;
+      --c-lp:        #e65100;
+      --c-lp-bg:     #fff3e0;
+      --c-lp-bd:     #ffcc80;
+      --c-vus:       #f57f17;
+      --c-vus-bg:    #fffde7;
+      --c-vus-bd:    #fff176;
+      --c-lb:        #558b2f;
+      --c-lb-bg:     #f1f8e9;
+      --c-lb-bd:     #aed581;
+      --c-ben:       #1b5e20;
+      --c-ben-bg:    #e8f5e9;
+      --c-ben-bd:    #81c784;
+
+      --font-display: 'Georgia', 'Times New Roman', serif;
+      --font-body:    -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
+      --font-mono:    'Menlo', 'Consolas', monospace;
+    }
+
+    /* ── Reset ──────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-body);
+      font-size: 13px;
+      color: var(--ink);
+      background: var(--surface);
+      line-height: 1.55;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Letterhead ─────────────────────────────────────────────────────── */
+    .letterhead {
+      background: var(--card);
+      border-bottom: 3px solid var(--accent);
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .letterhead-top {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 18px 32px 14px;
+    }
+    .letterhead-logo {
+      height: 52px;
+      width: auto;
+      flex-shrink: 0;
+    }
+    .letterhead-logo-placeholder {
+      width: 52px;
+      height: 52px;
+      background: var(--accent);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 22px;
+      font-family: var(--font-display);
+      font-weight: bold;
+      letter-spacing: -1px;
+      flex-shrink: 0;
+    }
+    .letterhead-brand h1 {
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: normal;
+      color: var(--accent);
+      letter-spacing: 0.2px;
+    }
+    .letterhead-brand p {
+      font-size: 12px;
+      color: var(--ink-mid);
+      margin-top: 1px;
+    }
+    .letterhead-meta {
+      background: var(--accent);
+      color: rgba(255,255,255,0.92);
+      padding: 7px 32px;
+      display: flex;
+      gap: 32px;
+      font-size: 11.5px;
+      flex-wrap: wrap;
+    }
+    .letterhead-meta span { display: flex; align-items: center; gap: 5px; }
+    .letterhead-meta strong { color: #fff; font-weight: 600; }
+
+    /* ── Page wrap ──────────────────────────────────────────────────────── */
+    .page-body { max-width: 1480px; margin: 0 auto; padding: 24px 28px 48px; }
+
+    /* ── Section titles ─────────────────────────────────────────────────── */
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--ink-light);
+      margin-bottom: 10px;
+    }
+
+    /* ── Summary cards ──────────────────────────────────────────────────── */
+    .summary-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .summary-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 20px;
+      flex: 1;
+      min-width: 120px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .summary-card .card-count {
+      font-family: var(--font-display);
+      font-size: 30px;
+      line-height: 1;
+      font-weight: normal;
+    }
+    .summary-card .card-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .summary-card.total  { border-top: 3px solid var(--accent); }
+    .summary-card.path   { border-top: 3px solid var(--c-path);  .card-count { color: var(--c-path);  } }
+    .summary-card.lp     { border-top: 3px solid var(--c-lp);    .card-count { color: var(--c-lp);    } }
+    .summary-card.vus    { border-top: 3px solid var(--c-vus);   .card-count { color: var(--c-vus);   } }
+    .summary-card.lb     { border-top: 3px solid var(--c-lb);    .card-count { color: var(--c-lb);    } }
+    .summary-card.ben    { border-top: 3px solid var(--c-ben);   .card-count { color: var(--c-ben);   } }
+
+    .card-total-count  { color: var(--accent); }
+    .card-path-count   { color: var(--c-path); }
+    .card-lp-count     { color: var(--c-lp); }
+    .card-vus-count    { color: var(--c-vus); }
+    .card-lb-count     { color: var(--c-lb); }
+    .card-ben-count    { color: var(--c-ben); }
+
+    /* ── Classification badges ──────────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      border: 1px solid transparent;
+    }
+    .badge-Pathogenic        { background: var(--c-path-bg); color: var(--c-path); border-color: var(--c-path-bd); }
+    .badge-Likely_Pathogenic { background: var(--c-lp-bg);   color: var(--c-lp);   border-color: var(--c-lp-bd);   }
+    .badge-VUS               { background: var(--c-vus-bg);  color: var(--c-vus);  border-color: var(--c-vus-bd);  }
+    .badge-Likely_Benign     { background: var(--c-lb-bg);   color: var(--c-lb);   border-color: var(--c-lb-bd);   }
+    .badge-Benign            { background: var(--c-ben-bg);  color: var(--c-ben);  border-color: var(--c-ben-bd);  }
+
+    /* ── Unevaluated criteria banner ────────────────────────────────────── */
+    .caveat-banner {
+      background: #fff8e1;
+      border: 1px solid #ffcc02;
+      border-left: 4px solid #f9a825;
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-size: 12px;
+      color: #5d4037;
+      margin-bottom: 20px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .caveat-banner .caveat-icon { font-size: 16px; line-height: 1.2; flex-shrink: 0; }
+
+    /* ── Main table ─────────────────────────────────────────────────────── */
+    .table-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .table-wrap .dataTables_wrapper {
+      padding: 14px 16px 10px;
+    }
+    .table-wrap .dataTables_filter input,
+    .table-wrap .dataTables_length select {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 12px;
+      color: var(--ink);
+    }
+
+    table#acmg-table {
+      width: 100% !important;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    table#acmg-table thead th {
+      background: var(--accent);
+      color: #fff;
+      padding: 9px 10px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      border-right: 1px solid rgba(255,255,255,0.15);
+      white-space: nowrap;
+    }
+    table#acmg-table thead th:first-child { border-radius: 0; }
+    table#acmg-table tbody tr { border-bottom: 1px solid var(--border); }
+    table#acmg-table tbody tr:last-child { border-bottom: none; }
+    table#acmg-table tbody tr:hover > td { background: var(--accent-soft) !important; }
+    table#acmg-table tbody td {
+      padding: 9px 10px;
+      vertical-align: middle;
+      color: var(--ink-mid);
+    }
+    table#acmg-table tbody td.gene-cell {
+      font-weight: 700;
+      color: var(--ink);
+    }
+    table#acmg-table tbody td.hgvs-cell {
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    table#acmg-table tbody td.criteria-cell {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      max-width: 200px;
+    }
+
+    /* Expand toggle */
+    .expand-btn {
+      cursor: pointer;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1.5px solid var(--border);
+      background: var(--surface);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: var(--ink-light);
+      transition: background 0.15s, color 0.15s, transform 0.2s;
+      flex-shrink: 0;
+    }
+    .expand-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .expand-btn.open  { background: var(--accent); color: #fff; border-color: var(--accent); transform: rotate(45deg); }
+
+    /* ── Expanded detail row ────────────────────────────────────────────── */
+    tr.detail-row td {
+      background: #f9f9fd !important;
+      padding: 0 !important;
+    }
+    .detail-panel {
+      padding: 16px 20px 18px 36px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px 32px;
+    }
+    .detail-section { display: flex; flex-direction: column; gap: 10px; }
+    .detail-section h4 {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--ink-light);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+      margin-bottom: 2px;
+    }
+    .detail-field { display: flex; flex-direction: column; gap: 2px; }
+    .detail-field .df-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--ink-light);
+    }
+    .detail-field .df-value {
+      font-size: 12.5px;
+      color: var(--ink);
+      line-height: 1.5;
+    }
+    .detail-field .df-value.mono { font-family: var(--font-mono); font-size: 11.5px; }
+    .unevaluated-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fff8e1;
+      border: 1px solid #ffcc02;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: #5d4037;
+      font-weight: 600;
+    }
+    .citations-list {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-mid);
+      line-height: 1.8;
+    }
+
+    /* ── Confidence pill ────────────────────────────────────────────────── */
+    .conf { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+    .conf-HIGH   { background: #e8f5e9; color: #2e7d32; }
+    .conf-MEDIUM { background: #fff3e0; color: #e65100; }
+    .conf-LOW    { background: #fce4ec; color: #c62828; }
+
+    /* ── Disclaimer ─────────────────────────────────────────────────────── */
+    .disclaimer {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 11.5px;
+      color: var(--ink-light);
+      background: var(--card);
+      line-height: 1.6;
+    }
+    .disclaimer strong { color: var(--ink-mid); }
+
+    /* ── Print styles ───────────────────────────────────────────────────── */
+    @media print {
+      body { background: #fff; font-size: 11px; }
+      .page-body { padding: 0 8px; max-width: 100%; }
+      .letterhead { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .letterhead-meta { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .table-wrap { border: none; }
+      .dataTables_filter, .dataTables_length, .dataTables_info,
+      .dataTables_paginate, .expand-btn { display: none !important; }
+      tr.detail-row { display: none !important; }
+      table#acmg-table thead th {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .summary-bar { page-break-inside: avoid; }
+      table { page-break-inside: auto; }
+      tr { page-break-inside: avoid; }
+      .disclaimer { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     LETTERHEAD
+════════════════════════════════════════════════════════════════════════ -->
+<header class="letterhead">
+  <div class="letterhead-top">
+    {% if logo_uri %}
+      <img class="letterhead-logo" src="{{ logo_uri }}" alt="{{ lab_name }} logo" />
+    {% else %}
+      <div class="letterhead-logo-placeholder">Gx</div>
+    {% endif %}
+    <div class="letterhead-brand">
+      <h1>{{ lab_name }}</h1>
+      {% if lab_subtitle %}
+        <p>{{ lab_subtitle }}</p>
+      {% endif %}
+      {% if lab_contact %}
+        <p>{{ lab_contact }}</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="letterhead-meta">
+    <span><strong>Report type:</strong> ACMG/AMP 2015 Variant Classification</span>
+    <span><strong>Session:</strong> {{ session_id }}</span>
+    <span><strong>Generated:</strong> {{ generated_at }}</span>
+    <span><strong>Genome:</strong> {{ genome_build }}</span>
+    <span><strong>Pipeline:</strong> v{{ pipeline_version }}</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     BODY
+════════════════════════════════════════════════════════════════════════ -->
+<div class="page-body">
+
+  <!-- Summary cards -->
+  <p class="section-title">Classification Summary</p>
+  <div class="summary-bar">
+    <div class="summary-card total">
+      <span class="card-count card-total-count">{{ counts.total }}</span>
+      <span class="card-label">Total Variants</span>
+    </div>
+    <div class="summary-card path">
+      <span class="card-count card-path-count">{{ counts.Pathogenic }}</span>
+      <span class="card-label" style="color:var(--c-path)">Pathogenic</span>
+    </div>
+    <div class="summary-card lp">
+      <span class="card-count card-lp-count">{{ counts.Likely_Pathogenic }}</span>
+      <span class="card-label" style="color:var(--c-lp)">Likely Pathogenic</span>
+    </div>
+    <div class="summary-card vus">
+      <span class="card-count card-vus-count">{{ counts.VUS }}</span>
+      <span class="card-label" style="color:var(--c-vus)">VUS</span>
+    </div>
+    <div class="summary-card lb">
+      <span class="card-count card-lb-count">{{ counts.Likely_Benign }}</span>
+      <span class="card-label" style="color:var(--c-lb)">Likely Benign</span>
+    </div>
+    <div class="summary-card ben">
+      <span class="card-count card-ben-count">{{ counts.Benign }}</span>
+      <span class="card-label" style="color:var(--c-ben)">Benign</span>
+    </div>
+  </div>
+
+  <!-- Unevaluated criteria caveat banner (shown if ANY variant has unevaluated criteria) -->
+  {% set has_any_unevaluated = rows | selectattr("_has_unevaluated") | list | length > 0 %}
+  {% if has_any_unevaluated %}
+  <div class="caveat-banner">
+    <span class="caveat-icon">⚠</span>
+    <div>
+      <strong>Note — Unevaluated criteria:</strong>
+      One or more variants could not be evaluated for criteria PP4 and/or BP5 because
+      no clinical notes or HPO terms were provided. These criteria were excluded from
+      classification. Rows with incomplete evaluation are marked in the Criteria column.
+      Clinical review is recommended before reporting.
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Variants table -->
+  <p class="section-title">Variant Classifications — click ＋ to expand details</p>
+  <div class="table-wrap">
+    <table id="acmg-table" class="display">
+      <thead>
+        <tr>
+          <th></th><!-- expand toggle -->
+          <th>#</th>
+          <th>Variant</th>
+          <th>Gene</th>
+          <th>HGVSc</th>
+          <th>HGVSp</th>
+          <th>Consequence</th>
+          <th>Classification</th>
+          <th>Criteria</th>
+          <th>Confidence</th>
+          <th>Pheno Score</th>
+          <th>gnomAD AF</th>
+          <th>ClinVar</th>
+          <th>★</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr data-row-id="{{ loop.index }}">
+          <td><button class="expand-btn" data-idx="{{ loop.index }}" title="Show details">+</button></td>
+          <td>{{ row.rank }}</td>
+          <td style="font-family:var(--font-mono);font-size:11px">{{ row.variant_id }}</td>
+          <td class="gene-cell">{{ row.gene }}</td>
+          <td class="hgvs-cell">{{ row.hgvsc }}</td>
+          <td class="hgvs-cell">{{ row.hgvsp or '—' }}</td>
+          <td>{{ row.consequence }}</td>
+          <td>
+            <span class="badge badge-{{ row._classification }}">
+              {{ row.final_classification | replace('_', ' ') }}
+            </span>
+          </td>
+          <td class="criteria-cell">
+            {{ row.criteria_applied }}
+            {% if row._has_unevaluated %}
+              <br/><span class="unevaluated-tag">⚠ PP4/BP5 not evaluated</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="conf conf-{{ row.confidence }}">{{ row.confidence }}</span>
+          </td>
+          <td>{{ row.phenotype_score }}</td>
+          <td style="font-family:var(--font-mono);font-size:11px">{{ row.max_gnomad_af }}</td>
+          <td>{{ row.clinvar_clnsig }}</td>
+          <td style="text-align:center">{{ row.clinvar_stars }}</td>
+        </tr>
+        <!-- Detail row (hidden by default) -->
+        <tr class="detail-row" id="detail-{{ loop.index }}" style="display:none;">
+          <td colspan="14">
+            <div class="detail-panel">
+
+              <!-- Left: Evidence & Classification detail -->
+              <div class="detail-section">
+                <h4>Evidence Summary</h4>
+                <div class="detail-field">
+                  <span class="df-value">{{ row.evidence_summary or '—' }}</span>
+                </div>
+                {% if row.debate_notes %}
+                <div class="detail-field">
+                  <span class="df-label">Debate Notes</span>
+                  <span class="df-value">{{ row.debate_notes }}</span>
+                </div>
+                {% endif %}
+                {% if row._has_unevaluated %}
+                <div class="detail-field">
+                  <span class="df-label">Unevaluated Criteria</span>
+                  <span class="df-value">
+                    <span class="unevaluated-tag">⚠ {{ row.unevaluated_str }}</span>
+                    — classification may change if clinical phenotype data is provided.
+                  </span>
+                </div>
+                {% endif %}
+                {% if row.recommended_followup %}
+                <div class="detail-field">
+                  <span class="df-label">Recommended Followup</span>
+                  <span class="df-value">{{ row.recommended_followup }}</span>
+                </div>
+                {% endif %}
+                {% if row.reclassification_conditions %}
+                <div class="detail-field">
+                  <span class="df-label">Reclassification If</span>
+                  <span class="df-value">{{ row.reclassification_conditions }}</span>
+                </div>
+                {% endif %}
+              </div>
+
+              <!-- Right: Scores, phenotype, technical detail -->
+              <div class="detail-section">
+                <h4>Technical Detail</h4>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px">
+                  {% for label, key in [
+                    ('REVEL', 'revel_score'), ('SpliceAI', 'max_spliceai'),
+                    ('CADD PHRED', 'cadd_phred'), ('Phase Status', 'phase_status'),
+                    ('Phase Confidence', 'phase_confidence'),
+                    ('Zygosity Filter', 'zygosity_filter_status'),
+                  ] %}
+                  <div class="detail-field">
+                    <span class="df-label">{{ label }}</span>
+                    <span class="df-value mono">{{ row[key] if row[key] is not none and row[key] != '' else '—' }}</span>
+                  </div>
+                  {% endfor %}
+                </div>
+
+                {% if row.matched_orphanet_disease %}
+                <div class="detail-field" style="margin-top:8px">
+                  <span class="df-label">Matched Disease</span>
+                  <span class="df-value">
+                    {{ row.matched_orphanet_disease }}
+                    {% if row.orphanet_id %}<span style="color:var(--ink-light)"> ({{ row.orphanet_id }})</span>{% endif %}
+                  </span>
+                </div>
+                {% endif %}
+
+                {% if row.hpo_matched_genes_str and row.hpo_matched_genes_str != '—' %}
+                <div class="detail-field">
+                  <span class="df-label">HPO Matched Genes</span>
+                  <span class="df-value mono">{{ row.hpo_matched_genes_str }}</span>
+                </div>
+                {% endif %}
+
+                {% if row._has_warnings %}
+                <div class="detail-field">
+                  <span class="df-label">⚠ Warnings</span>
+                  <span class="df-value" style="color:#c62828">{{ row.warnings_str }}</span>
+                </div>
+                {% endif %}
+
+                {% if row.citations_str %}
+                <div class="detail-field" style="margin-top:8px">
+                  <h4 style="margin-bottom:4px">Citations</h4>
+                  <div class="citations-list">
+                    {% for cite in row.citations_str.split('; ') %}
+                      {% if cite.strip() %}<div>{{ cite.strip() }}</div>{% endif %}
+                    {% endfor %}
+                  </div>
+                </div>
+                {% endif %}
+
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Disclaimer -->
+  <div class="disclaimer">
+    <strong>Clinical Disclaimer — </strong>{{ disclaimer }}
+    Report generated by ACMG Multi-Agent Classification Pipeline v{{ pipeline_version }}.
+  </div>
+
+</div><!-- /page-body -->
+
+<script>
+$(document).ready(function () {
+
+  // DataTable init — skip the expand/toggle column from sorting/search
+  var table = $('#acmg-table').DataTable({
+    pageLength: 50,
+    lengthMenu: [25, 50, 100, 500],
+    order: [[7, 'asc']],   // sort by classification column by default
+    columnDefs: [
+      { orderable: false, searchable: false, targets: 0 },   // expand btn
+    ],
+    language: {
+      search:      "Filter variants:",
+      lengthMenu:  "Show _MENU_ per page",
+      info:        "Showing _START_–_END_ of _TOTAL_ variants",
+    }
+  });
+
+  // Row expansion
+  $('#acmg-table tbody').on('click', '.expand-btn', function () {
+    var idx   = $(this).data('idx');
+    var detailRow = $('#detail-' + idx);
+    var isOpen = detailRow.is(':visible');
+
+    if (isOpen) {
+      detailRow.hide();
+      $(this).removeClass('open').text('+');
+    } else {
+      detailRow.show();
+      $(this).addClass('open').text('+');
+    }
+  });
+
+});
+</script>
+</body>
+</html>
+

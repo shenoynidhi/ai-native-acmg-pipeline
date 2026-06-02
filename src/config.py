@@ -2,10 +2,16 @@
 Central configuration for the ACMG pipeline.
 All paths, thresholds, and settings live here.
 
-Adapted for:
-  - vLLM backend (Qwen2.5-14B on pod-b) instead of Ollama
-  - Existing VEP databases under /workspace/data/.vep/
-  - Functional LLM client style (call_llm / call_llm_json)
+All paths and binary locations are driven by environment variables so the
+same codebase runs unchanged across:
+  - Kubernetes pod (current dev environment)
+  - Local Docker Compose (laptop development)
+  - AWS ECS / EKS (production)
+
+Environment variable precedence:
+  1. Shell environment (set by Docker Compose or ECS task definition)
+  2. .env file (local dev convenience)
+  3. Hardcoded defaults (pod fallbacks for current dev stage)
 """
 
 import os
@@ -14,24 +20,49 @@ from typing import Dict
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-load_dotenv("/workspace/data/acmg-pipeline/.env")
+# Load .env from project root — works on pod and locally.
+# In Docker, env vars are injected directly so .env is ignored.
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # ---------------------------------------------------------------------------
-# Base directories
+# Base directories — all overridable via environment variables
 # ---------------------------------------------------------------------------
-BASE_DIR     = Path("/workspace/data/acmg-pipeline")
-SRC_DIR      = BASE_DIR / "src"
-DATA_DIR     = BASE_DIR / "data"
-DATABASE_DIR = DATA_DIR / "databases"      # small reference files downloaded here
-CHROMADB_DIR = DATA_DIR / "chromadb"
-OUTPUT_DIR   = DATA_DIR / "output"
-REFERENCE_DIR = DATA_DIR / "reference"
+# On pod:          /workspace/data/acmg-pipeline/data/*
+# In Docker:       /data/*  (mounted volumes)
+# On AWS:          /data/*  (EBS volume or S3 mount)
 
-# VEP plugin/cache root (already populated in the pod)
-VEP_ROOT     = Path("/workspace/data/.vep")
+DATABASE_DIR  = Path(os.getenv("DATABASE_DIR",  "/workspace/data/acmg-pipeline/data/databases"))
+CHROMADB_DIR  = Path(os.getenv("CHROMADB_DIR",  "/workspace/data/acmg-pipeline/data/chromadb"))
+OUTPUT_DIR    = Path(os.getenv("OUTPUT_DIR",    "/workspace/data/acmg-pipeline/data/output"))
+REFERENCE_DIR = Path(os.getenv("REFERENCE_DIR", "/workspace/data/acmg-pipeline/data/reference"))
+
+# VEP cache + plugin data root
+# On pod:    /workspace/data/.vep
+# In Docker: /data/vep  (mounted from host)
+VEP_ROOT = Path(os.getenv("VEP_DATA_DIR", "/workspace/data/.vep"))
 
 # ---------------------------------------------------------------------------
-# vLLM / LLM settings  (read from .env, fall back to sensible defaults)
+# Binary paths — overridable so Docker containers use their own installs
+# ---------------------------------------------------------------------------
+# On pod:    conda env paths (hardcoded below as fallback)
+# In Docker: /usr/bin/bcftools etc (installed in container image)
+
+VEP_BINARY      = Path(os.getenv("VEP_BINARY",
+    "/workspace/data/envs/vep/share/ensembl-vep-115.2-1/vep"))
+VEP_PERL        = Path(os.getenv("VEP_PERL",
+    "/workspace/data/envs/vep/bin/perl"))
+BCFTOOLS_BINARY = Path(os.getenv("BCFTOOLS_BINARY",
+    "/workspace/data/envs/bcftools_env/bin/bcftools"))
+SAMTOOLS_BINARY = Path(os.getenv("SAMTOOLS_BINARY",
+    "/workspace/data/envs/bcftools_env/bin/samtools"))
+WHATSHAP_BINARY = Path(os.getenv("WHATSHAP_BINARY",
+    "/workspace/data/envs/whatshap_env/bin/whatshap"))
+
+# ---------------------------------------------------------------------------
+# vLLM / LLM settings
+# On pod:    vLLM on pod-b at 172.29.127.170:8000
+# In Docker: set LLM_BASE_URL in docker-compose.yml or .env
+# On AWS:    set LLM_BASE_URL to SageMaker endpoint or hosted vLLM instance
 # ---------------------------------------------------------------------------
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://172.29.127.170:8000/v1")
 LLM_MODEL:    str = os.getenv("LLM_MODEL",    "qwen2.5-14b")
@@ -156,12 +187,16 @@ OPTIONAL_DATABASE_PATHS: dict = {
     # then: gunzip data/reference/GRCh38.fa.gz && samtools faidx data/reference/GRCh38.fa
     "reference_fasta":     REFERENCE_DIR / "GRCh38.fa",
     "reference_fasta_fai": REFERENCE_DIR / "GRCh38.fa.fai",
+    "reference_fasta_grch37": REFERENCE_DIR / "GRCh37.fa",
+    "reference_fasta_fai_grch37": REFERENCE_DIR / "GRCh37.fa.fai",
 
     # Needed for Agent 9 (PP4/BP5 — phenotype/disease matching)
     # Manual download from https://www.orphadata.com/genes/
     # Files: en_product6.xml → genes_diseases.xml, en_product9_ages.xml → epidemiology.xml
-    "orphanet_genes":        DATABASE_DIR / "orphanet" / "genes_diseases.xml",
-    "orphanet_epidemiology": DATABASE_DIR / "orphanet" / "epidemiology.xml",
+    
+    "orphanet_genes":           DATABASE_DIR / "orphanet" / "genes_diseases.xml",
+    "orphanet_inheritance_tsv": DATABASE_DIR / "orphanet" / "orphanet_disease_gene_inheritance.tsv",
+    "omim_morbidmap":           DATABASE_DIR / "omim_tmp"     / "morbidmap.txt",
 
     # Needed for Agent 8 (PM4/BP3 — in-repeat indel evidence)
     # wget "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/rmsk.txt.gz"
@@ -235,16 +270,6 @@ VEP_SETTINGS: dict = {
 # Convenience helper — check which required databases are missing
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# VEP runtime binaries
-# Use the vep conda env's own Perl to avoid @INC module-not-found errors.
-# The system Perl at /usr/bin/perl does NOT have the conda Ensembl modules.
-# ---------------------------------------------------------------------------
-VEP_BINARY = Path("/workspace/data/envs/vep/share/ensembl-vep-115.2-1/vep")
-VEP_PERL   = Path("/workspace/data/envs/vep/bin/perl")
-BCFTOOLS_BINARY = Path("/workspace/data/envs/bcftools_env/bin/bcftools")
-SAMTOOLS_BINARY = Path("/workspace/data/envs/bcftools_env/bin/samtools")
-
 def check_databases(verbose: bool = True) -> Dict[str, bool]:
     """
     Check which DATABASE_PATHS (required) and OPTIONAL_DATABASE_PATHS entries
@@ -298,3 +323,16 @@ if __name__ == "__main__":
     print(f"Missing : {len(missing)}/{len(results)}")
     if missing:
         print("\nMissing keys:", missing)
+
+###REPORT####
+
+from src.pipeline.nodes.report_generator import ReportConfig
+
+REPORT_CONFIG = ReportConfig(
+    lab_name         = os.getenv("LAB_NAME", "Genomics Laboratory"),
+    lab_contact      = os.getenv("LAB_CONTACT", ""),
+    logo_path        = os.getenv("LAB_LOGO_PATH"),       # absolute path to PNG/SVG
+    pipeline_version = "1.0",
+    disclaimer = os.getenv("REPORT_DISCLAIMER", "This report is intended for clinical research use only. Variant classifications should be interpreted by a qualified clinical geneticist in the context of the patient's full clinical presentation."),
+)
+
