@@ -50,6 +50,7 @@ from typing import Optional
 from src.pipeline.state import VariantState
 from src.rag.retriever import query_uniprot_domains
 from src.utils.llm_client import call_llm_json
+from src.pipeline.pubmed import pubmed_search, pubmed_format_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +306,7 @@ def _llm_refine(
     domain_hits: list[dict],
     ps3_signal: bool,
     bs3_signal: bool,
+    pubmed_hits: list[dict],
     notes: list[str],
 ) -> dict:
     gene        = state.get("gene", "UNKNOWN")
@@ -329,7 +331,7 @@ def _llm_refine(
             f"  {m.get('feature_type')} {m.get('start')}-{m.get('end')}: "
             f"{m.get('note', 'no description')}"
         )
-
+    pubmed_section = pubmed_format_for_llm(pubmed_hits)
     user_prompt = f"""Evaluate functional and domain evidence for this variant:
 
 Gene: {gene}
@@ -356,6 +358,9 @@ PS3/BS3 signals from rule-based analysis:
   PS3 signal: {ps3_signal}
   BS3 signal: {bs3_signal}
   Notes: {'; '.join(notes)}
+
+PubMed literature (functional assays):
+{pubmed_section}
 
 Rule-based criteria so far:
   Pathogenic: {rule_criteria_p}
@@ -428,10 +433,34 @@ def agent5_functional(state: VariantState) -> dict:
     if pm1_strength:
         criteria_p["PM1"] = pm1_strength
     all_notes.extend(pm1_notes)
-
+    # --- Step 2b: BP3 — variant in repeat region with no known function ---
+    if state.get("repeat_region") and consequence in (
+        "inframe_insertion", "inframe_deletion", "protein_altering_variant"
+    ):
+        criteria_b["BP3"] = "Supporting"
+        all_notes.append(
+            f"BP3 (Supporting): Variant is in a repeat region "
+            f"(VEP low_complexity flag). In-frame change in repeat "
+            f"without known functional impact."
+        )
     # --- Step 3: PS3/BS3 signals ---
     ps3_signal, bs3_signal, ps3_notes = _ps3_bs3_signals(state)
     all_notes.extend(ps3_notes)
+    
+# --- Step 3b: PubMed search — functional assay literature ---
+    pubmed_hits = []
+    try:
+        pubmed_hits = pubmed_search(
+            gene=gene,
+            hgvsp=state.get("hgvsp"),
+            hgvsc=state.get("hgvsc"),
+            query_type="functional",
+            max_results=10,
+        )
+        logger.debug(f"[agent5] PubMed returned {len(pubmed_hits)} functional papers for {variant_id}")
+    except Exception as e:
+        logger.warning(f"[agent5] PubMed search failed: {e}")
+        all_notes.append(f"PubMed search failed: {e}")
 
     # --- Step 4: LLM refinement ---
     # Always call LLM for PS3/BS3 — these require nuanced literature knowledge.
@@ -446,7 +475,7 @@ def agent5_functional(state: VariantState) -> dict:
         logger.debug(f"[agent5] Calling LLM for PS3/BS3/PM1 on {variant_id}")
         llm_result = _llm_refine(
             state, criteria_p, criteria_b,
-            domain_hits, ps3_signal, bs3_signal, all_notes,
+            domain_hits, ps3_signal, bs3_signal, pubmed_hits, all_notes,
         )
 
         if llm_result and not llm_result.get("error"):

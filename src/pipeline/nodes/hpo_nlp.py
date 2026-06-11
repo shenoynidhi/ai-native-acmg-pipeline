@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DOC2HPO_URL   = "https://doc2hpo.wglab.org/parse/acdat"
-DOC2HPO_TIMEOUT = 30   # seconds
+DOC2HPO_TIMEOUT = 5   # seconds
 
 # ---------------------------------------------------------------------------
 # hp.obo parser — lazy-loaded once at first node invocation

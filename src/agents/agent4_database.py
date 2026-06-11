@@ -40,6 +40,7 @@ from typing import Optional
 from src.pipeline.state import VariantState
 from src.rag.retriever import query_clinvar_by_variant, query_clinvar_same_codon
 from src.utils.llm_client import call_llm_json
+from src.pipeline.pubmed import pubmed_search, pubmed_format_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,7 @@ def _llm_refine(
     rule_criteria_p: dict,
     rule_criteria_b: dict,
     rag_hits: list[dict],
+    pubmed_hits: list[dict],
     notes: list[str],
 ) -> dict:
     gene       = state.get("gene", "UNKNOWN")
@@ -251,7 +253,7 @@ def _llm_refine(
             f"  {m.get('chrom')}:{m.get('pos')} {m.get('ref')}>{m.get('alt')} "
             f"| {m.get('clnsig')} | {m.get('stars')} stars | gene={m.get('gene')}"
         )
-
+    pubmed_section = pubmed_format_for_llm(pubmed_hits)
     user_prompt = f"""Evaluate database/prior classification evidence for this variant:
 
 Gene: {gene}
@@ -268,6 +270,9 @@ Direct ClinVar annotation (from VEP):
 
 RAG-retrieved ClinVar hits (same gene/region):
 {chr(10).join(hit_summaries) or '  No hits retrieved'}
+
+PubMed literature (variant classification):
+{pubmed_section}
 
 Rule-based pre-evaluation:
   Pathogenic criteria: {rule_criteria_p}
@@ -335,6 +340,21 @@ def agent4_database(state: VariantState) -> dict:
         logger.warning(f"[agent4] RAG query failed: {e}")
         all_notes.append(f"ClinVar RAG query failed: {e}")
 
+# --- Step 2b: PubMed search — variant classification literature ---
+    pubmed_hits = []
+    try:
+        pubmed_hits = pubmed_search(
+            gene=gene,
+            hgvsp=state.get("hgvsp"),
+            hgvsc=state.get("hgvsc"),
+            query_type="variant",
+            max_results=10,
+        )
+        logger.debug(f"[agent4] PubMed returned {len(pubmed_hits)} papers for {variant_id}")
+    except Exception as e:
+        logger.warning(f"[agent4] PubMed search failed: {e}")
+        all_notes.append(f"PubMed search failed: {e}")
+
     # --- Step 3: PS1 from RAG (only if PP5 not already assigned for same variant) ---
     if "PP5" not in criteria_p and rag_hits:
         ps1_strength, ps1_notes = _evaluate_ps1_from_rag(
@@ -366,7 +386,7 @@ def agent4_database(state: VariantState) -> dict:
 
     if needs_llm:
         logger.debug(f"[agent4] Calling LLM for {variant_id}")
-        llm_result = _llm_refine(state, criteria_p, criteria_b, rag_hits, all_notes)
+        llm_result = _llm_refine(state, criteria_p, criteria_b, rag_hits, pubmed_hits, all_notes)
 
         if llm_result and not llm_result.get("error"):
             criteria_p = llm_result.get("criteria_pathogenic", criteria_p)

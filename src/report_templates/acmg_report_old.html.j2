@@ -356,56 +356,7 @@
     }
     .disclaimer strong { color: var(--ink-mid); }
 
-    /* ── Tavtigian gauge ─────────────────────────────────────────────────── */
-    .tavtigian-gauge-wrap { margin-top: 6px; }
-    .tavtigian-gauge { width: 100%; max-width: 480px; }
-    .gauge-track {
-      position: relative;
-      height: 14px;
-      border-radius: 7px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-    }
-    .gauge-zone {
-      position: absolute;
-      top: 0; bottom: 0;
-    }
-    .gz-benign { background: var(--c-ben-bg);  border-right: 1px solid var(--c-ben-bd); }
-    .gz-lb     { background: var(--c-lb-bg);   border-right: 1px solid var(--c-lb-bd);  }
-    .gz-vus    { background: var(--c-vus-bg);  border-right: 1px solid var(--c-vus-bd); }
-    .gz-lp     { background: var(--c-lp-bg);   border-right: 1px solid var(--c-lp-bd);  }
-    .gz-path   { background: var(--c-path-bg); }
-    .gauge-marker {
-      position: absolute;
-      top: 0; bottom: 0;
-      width: 3px;
-      background: var(--ink);
-      border-radius: 2px;
-      transform: translateX(-50%);
-      z-index: 2;
-      box-shadow: 0 0 0 1px rgba(255,255,255,0.6);
-    }
-    .gauge-labels {
-      display: flex;
-      justify-content: space-between;
-      font-size: 9px;
-      color: var(--ink-light);
-      margin-top: 3px;
-      letter-spacing: 0.2px;
-    }
-    .tavtigian-score-line {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 6px;
-      font-size: 12px;
-    }
-    .tav-points {
-      font-weight: 700;
-      font-family: var(--font-mono);
-      color: var(--ink);
-    }
-    .tav-note { color: var(--ink-light); font-size: 11px; }
+    /* ── Print styles ───────────────────────────────────────────────────── */
     @media print {
       body { background: #fff; font-size: 11px; }
       .page-body { padding: 0 8px; max-width: 100%; }
@@ -626,43 +577,6 @@
           </div>
           {% endfor %}
         </div>
-        {% if row.tavtigian_points is not none %}
-        <div class="detail-field" style="margin-top:8px">
-          <h4>Bayesian Score (Tavtigian 2020)</h4>
-          <div class="tavtigian-gauge-wrap">
-            <div class="tavtigian-gauge">
-              <div class="gauge-track">
-                {% set min_pts = -10 %}
-                {% set max_pts = 12 %}
-                {% set range = max_pts - min_pts %}
-                {% set clipped = [min_pts, [row.tavtigian_points, max_pts] | min] | max %}
-                {% set pct = ((clipped - min_pts) / range * 100) | round(1) %}
-
-                <div class="gauge-zone gz-benign" style="left:0%; width:16.67%"></div>
-                <div class="gauge-zone gz-lb" style="left:16.67%; width:16.67%"></div>
-                <div class="gauge-zone gz-vus" style="left:33.33%; width:16.67%"></div>
-                <div class="gauge-zone gz-lp" style="left:50%; width:16.67%"></div>
-                <div class="gauge-zone gz-path" style="left:66.67%; width:33.33%"></div>
-
-                <div class="gauge-marker" style="left:{{ pct }}%"></div>
-              </div>
-              <div class="gauge-labels">
-                <span>Benign</span>
-                <span>Likely Benign</span>
-                <span>VUS</span>
-                <span>Likely Pathogenic</span>
-                <span>Pathogenic</span>
-              </div>
-            </div>
-            <div class="tavtigian-score-line">
-              <span class="tav-points">{{ row.tavtigian_points }} pts</span>
-              <span>→</span>
-              <span><strong>{{ row.tavtigian_classification | replace('_', ' ') }}</strong></span>
-              <span class="tav-note">(Tavtigian 2020 point system)</span>
-            </div>
-          </div>
-        </div>
-        {% endif %}
         {% if row.matched_orphanet_disease %}
         <div class="detail-field" style="margin-top:8px">
           <span class="df-label">Matched Disease</span>

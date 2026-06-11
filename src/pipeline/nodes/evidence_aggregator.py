@@ -379,7 +379,12 @@ def evidence_aggregator_node(state: VariantState) -> dict:
         f"[evidence_aggregator] {variant_id}: {classification} "
         f"rules={all_rules} conflict={conflict} BA1={ba1_fired}"
     )
-
+# Merge citations from all agents
+    all_citations: list[str] = []
+    for agent_key, evidence in agent_evidence.items():
+        if isinstance(evidence, dict):
+            all_citations.extend(evidence.get("citations", []))
+    all_citations = list(dict.fromkeys(all_citations))  # deduplicate, preserve order
     return {
         "all_criteria_pathogenic":    criteria_p,
         "all_criteria_benign":        criteria_b,
@@ -391,4 +396,5 @@ def evidence_aggregator_node(state: VariantState) -> dict:
         "pathogenic_counts": cp,   # {"Very Strong":1, "Strong":0, ...}
         "benign_counts":     cb,
         "aggregator_notes": aggregator_notes,
+        "all_citations": all_citations,
     }

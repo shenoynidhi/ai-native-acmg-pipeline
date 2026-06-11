@@ -12,6 +12,10 @@ The context is created once by the API / CLI entry point and passed into
 every node that needs session-level information (file paths, config, HPO terms).
 It is NOT part of the LangGraph state — it is passed as a closure or argument
 to node functions that need it.
+
+# NOTE: Not yet instantiated by runner.py — will be used by src/api/worker.py (Step 6)
+# runner.py currently carries session-level data directly in VariantState.
+# Do not refactor until the API layer is built.
 """
 
 import uuid

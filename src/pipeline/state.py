@@ -203,6 +203,10 @@ class VariantState(TypedDict):
     reclassification_conditions: Optional[str] # what new evidence would change the call
     all_citations:             List[str]       # merged citations from all agents
 
+    #Additions
+    tavtigian_points:           Optional[int]
+    tavtigian_classification:   Optional[str]
+
     # -------------------------------------------------------------------------
     # Phase 11 — phenotype / HPO  (populated by hpo_* and phenotype_scorer nodes)
     # -------------------------------------------------------------------------
@@ -261,8 +265,8 @@ def build_initial_state(
         session_id        = session_id,
         warnings          = [],
         proband_vcf_path  = proband_vcf_path,
-        parent1_vcf_path  = None,
-        parent2_vcf_path  = None,
+        parent1_vcf_path  = parent1_vcf_path,
+        parent2_vcf_path  = parent2_vcf_path,
         trio_mode         = trio_mode,
         parent1_genotype  = None,
         parent2_genotype  = None,
@@ -369,6 +373,9 @@ def build_initial_state(
         debate_notes =                        None,
         unevaluated_criteria_report =         None,
         all_citations =                       [],
+        tavtigian_points          = None,
+        tavtigian_classification  = None,
+
         # --- phenotype ---
         clinical_notes = clinical_notes,
         patient_hpo_terms        = patient_hpo_terms or [],

@@ -378,7 +378,10 @@ def _parse_vep_row(
     csq_set = set(consequence.split("&"))
     is_inframe = bool(csq_set & _INFRAME_CONSEQUENCES)
     is_stop_loss = "stop_lost" in csq_set
-
+# repeat_region: True if VEP FLAGS column contains low_complexity marker
+    # RepeatMasker-based richer check is deferred to agent 8 (PM4/BP3)
+    vep_flags = (row.get("FLAGS", "") or "").lower()
+    is_repeat_region = "low_complexity" in vep_flags or "repeat" in vep_flags
     # Protein position
     prot_pos = _int(row.get("Protein_position", "") or "")
 
@@ -442,7 +445,7 @@ def _parse_vep_row(
         # Phase 5 — structural flags
         "is_inframe_indel": is_inframe,
         "is_stop_loss":     is_stop_loss,
-
+        "repeat_region": is_repeat_region,
         # Phase 6 — gene-level context
         "gene_clingen_validity":    clingen_val,
         "gene_gnomad_pli":          pli,

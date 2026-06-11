@@ -2,23 +2,8 @@
 src/pipeline/nodes/vep_runner.py
 
 VEP Runner Node — Phase 4
-Shells out to VEP 115.2 (in the vep conda env) to annotate a filtered VCF.
-
-Inputs  (from VariantState):
-    session_id          — used to find the work directory
-    filtered_vcf        — path set by prefilter_node (or proband_vcf_path if no prefilter)
-
-Outputs (added to VariantState):
-    annotated_tsv       — path to the VEP tab-delimited output file
-    vep_already_annotated — set False (we just ran VEP, so downstream skip-check is clear)
-    warnings            — any VEP stderr warnings appended here
-
-Plugins enabled (all data already present in /workspace/data/.vep/):
-    dbNSFP    — REVEL, CADD_phred, PolyPhen2, SIFT, phyloP100way, GERP++
-    SpliceAI  — masked SNV + indel scores
-    LoF       — LOFTEE HC/LC classification
-    ClinVar   — CLNSIG, CLNREVSTAT, CLNDN, CLNACC (via --custom)
-    gnomAD    — exome AFs via --af_gnomad (built into VEP cache)
+Shells out to VEP 115.2 to annotate a filtered VCF.
+Now fully build-aware: GRCh38 and GRCh37 both supported.
 """
 
 import logging
@@ -31,24 +16,14 @@ from src.config import (
     VEP_PERL,
     VEP_ROOT,
     OUTPUT_DIR,
+    get_database_paths,
 )
 from src.pipeline.state import VariantState
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Paths derived from VEP_ROOT — all confirmed present in plugin test
-# ---------------------------------------------------------------------------
-_DBNSFP      = VEP_ROOT / "dbnsfp"  / "dbNSFP5.3.1a_grch38.gz"
-_SPLICEAI_SNV   = VEP_ROOT / "spliceai" / "spliceai_scores.masked.snv.hg38.vcf.gz"
-_SPLICEAI_INDEL = VEP_ROOT / "spliceai" / "spliceai_scores.masked.indel.hg38.vcf.gz"
-_LOFTEE_DIR     = VEP_ROOT / "loftee"
-_LOFTEE_ANC_FA  = VEP_ROOT / "loftee"  / "human_ancestor.fa.gz"
-_LOFTEE_GERP    = VEP_ROOT / "loftee"  / "gerp_conservation_scores.homo_sapiens.GRCh38.bw"
-_CLINVAR_VCF    = VEP_ROOT / "clinvar" / "clinvar.vcf.gz"
-_PLUGINS_DIR    = VEP_ROOT / "Plugins"
+_PLUGINS_DIR = VEP_ROOT / "Plugins"
 
-# dbNSFP fields to extract — maps directly to VariantState fields in post_process_node
 _DBNSFP_FIELDS = [
     "REVEL_score",
     "CADD_phred",
@@ -60,65 +35,80 @@ _DBNSFP_FIELDS = [
     "MetaSVM_score",
 ]
 
+# LOFTEE uses different GERP mechanism per build
+# GRCh38: bigwig (.bw)   GRCh37: tabix-indexed txt.gz
+_LOFTEE_GERP_FLAG = {
+    "GRCh38": "gerp_bigwig",
+    "GRCh37": "gerp_tabix",
+}
 
-def _build_vep_command(input_vcf: Path, output_tsv: Path) -> List[str]:
-    """
-    Build the full VEP command list.
-    Structured so each logical group is easy to audit and extend.
-    """
+
+def _build_vep_command(
+    input_vcf: Path,
+    output_tsv: Path,
+    genome_build: str,
+) -> List[str]:
+    """Build the full VEP command for the given genome build."""
+
+    db = get_database_paths(genome_build)
+    build_upper = genome_build.upper()  # "GRCH38" / "GRCH37"
+    assembly    = "GRCh37" if build_upper == "GRCH37" else "GRCh38"
+    cache_key   = "vep_cache_grch37" if build_upper == "GRCH37" else "vep_cache"
+
+    loftee_gerp_flag = _LOFTEE_GERP_FLAG.get(assembly, "gerp_bigwig")
+
     cmd = [
         str(VEP_PERL),
         str(VEP_BINARY),
 
-        # --- Cache / offline mode ---
+        # Cache / offline
         "--cache",
         "--offline",
-        "--dir",          str(VEP_ROOT),
-        "--dir_plugins",  str(_PLUGINS_DIR),
-        "--species",      "homo_sapiens",
-        "--assembly",     "GRCh38",
-        "--cache_version","115",
+        "--dir",           str(VEP_ROOT),
+        "--dir_plugins",   str(_PLUGINS_DIR),
+        "--species",       "homo_sapiens",
+        "--assembly",      assembly,
+        "--cache_version", "115",
 
-        # --- Input / output ---
-        "--input_file",   str(input_vcf),
-        "--output_file",  str(output_tsv),
+        # Input / output
+        "--input_file",    str(input_vcf),
+        "--output_file",   str(output_tsv),
         "--force_overwrite",
-        "--tab",                  # tab-delimited output (easier to parse than VCF CSQ)
-        "--no_stats",             # skip HTML stats file — not needed in pipeline
+        "--tab",
+        "--no_stats",
 
-        # --- Transcript selection ---
-        "--canonical",            # annotate canonical transcript flag
-        "--symbol",               # include HGNC gene symbol
-        "--numbers",              # exon/intron numbers (e.g. 3/23)
-        "--hgvs",                 # HGVSc and HGVSp
-        "--hgvsg",                # HGVSg (genomic)
+        # Transcript / annotation flags
+        "--canonical",
+        "--symbol",
+        "--numbers",
+        "--hgvs",
+        "--hgvsg",
+        "--everything",
 
-        # --- Filtering (keep everything, prefilter_node already applied quality filters) ---
-        "--everything",           # enable all annotation flags above in one switch
-                                  # (overrides individual flags but we keep them explicit
-                                  #  for clarity; --everything is not redundant here as
-                                  #  it also enables regulatory, protein domains, etc.)
-
-        # --- Plugins ---
+        # dbNSFP plugin
         "--plugin", (
-            f"dbNSFP,{_DBNSFP},"
+            f"dbNSFP,{db['dbnsfp']},"
             + ",".join(_DBNSFP_FIELDS)
         ),
+
+        # SpliceAI plugin
         "--plugin", (
             f"SpliceAI,"
-            f"snv={_SPLICEAI_SNV},"
-            f"indel={_SPLICEAI_INDEL}"
-        ),
-        "--plugin", (
-            f"LoF,"
-            f"loftee_path:{_LOFTEE_DIR},"
-            f"human_ancestor_fa:{_LOFTEE_ANC_FA},"
-            f"gerp_bigwig:{_LOFTEE_GERP}"
+            f"snv={db['spliceai_snv']},"
+            f"indel={db['spliceai_indel']}"
         ),
 
-        # --- Custom annotation: ClinVar ---
+        # LOFTEE plugin
+        "--plugin", (
+            f"LoF,"
+            f"loftee_path:{db['loftee_dir']},"
+            f"human_ancestor_fa:{db['loftee_human_ancestor_fa']},"
+            f"{loftee_gerp_flag}:{db['loftee_gerp']}"
+        ),
+
+        # ClinVar custom annotation
         "--custom", (
-            f"file={_CLINVAR_VCF},"
+            f"file={db['clinvar_vcf']},"
             "short_name=ClinVar,"
             "format=vcf,"
             "type=exact,"
@@ -132,20 +122,12 @@ def _build_vep_command(input_vcf: Path, output_tsv: Path) -> List[str]:
 def vep_runner_node(state: VariantState) -> dict:
     """
     Run VEP on the filtered VCF and write annotated TSV to the session work dir.
-
-    Reads:
-        state["session_id"]       — to locate work dir
-        state["filtered_vcf"]     — path to input (set by prefilter_node)
-                                    falls back to proband_vcf_path if prefilter skipped
-    Writes:
-        annotated_tsv             — path to VEP output TSV
-        vep_already_annotated     — False (we just ran, clear the skip flag)
-        warnings                  — any stderr lines appended
+    Reads genome_build from state (defaults to GRCh38).
     """
-    session_id = state["session_id"]
-    warnings   = list(state.get("warnings", []))
+    session_id   = state["session_id"]
+    genome_build = state.get("genome_build", "GRCh38")
+    warnings     = list(state.get("warnings", []))
 
-    # Resolve input path: prefer filtered VCF, fall back to raw proband VCF
     input_vcf = state.get("filtered_vcf") or state.get("proband_vcf_path")
     if not input_vcf:
         raise ValueError(f"[{session_id}] vep_runner: no input VCF path in state.")
@@ -153,34 +135,31 @@ def vep_runner_node(state: VariantState) -> dict:
     if not input_vcf.exists():
         raise FileNotFoundError(f"[{session_id}] vep_runner: input VCF not found: {input_vcf}")
 
-    # Output TSV path
-    work_dir    = OUTPUT_DIR / session_id / "vep_out"
+    work_dir   = OUTPUT_DIR / session_id / "vep_out"
     work_dir.mkdir(parents=True, exist_ok=True)
-    output_tsv  = work_dir / f"{session_id}_vep.tsv"
+    output_tsv = work_dir / f"{session_id}_vep.tsv"
 
-    # Build and log the command
-    cmd = _build_vep_command(input_vcf, output_tsv)
-    logger.info(f"[{session_id}] Running VEP on {input_vcf.name}")
+    cmd = _build_vep_command(input_vcf, output_tsv, genome_build)
+    logger.info(f"[{session_id}] Running VEP ({genome_build}) on {input_vcf.name}")
     logger.debug(f"[{session_id}] VEP command:\n  " + " \\\n  ".join(cmd))
 
-    # Execute
     try:
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=7200,   # 2-hour hard limit; a full exome takes ~20-40 min
+            timeout=7200,
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"[{session_id}] VEP timed out after 2 hours on {input_vcf}")
 
-    # Always log stderr — VEP writes progress + warnings there
     if proc.stderr:
         for line in proc.stderr.splitlines():
-            if any(kw in line.lower() for kw in ("error", "failed", "die", "fatal")):
+            ll = line.lower()
+            if any(kw in ll for kw in ("error", "failed", "die", "fatal")):
                 logger.error(f"[{session_id}] VEP stderr: {line}")
                 warnings.append(f"VEP_ERROR: {line}")
-            elif "warn" in line.lower() or "could not" in line.lower():
+            elif "warn" in ll or "could not" in ll:
                 logger.warning(f"[{session_id}] VEP stderr: {line}")
                 warnings.append(f"VEP_WARN: {line}")
             else:
@@ -200,7 +179,7 @@ def vep_runner_node(state: VariantState) -> dict:
     logger.info(f"[{session_id}] VEP complete → {output_tsv}")
 
     return {
-        "annotated_tsv":        str(output_tsv),
+        "annotated_tsv":         str(output_tsv),
         "vep_already_annotated": False,
-        "warnings":             warnings,
+        "warnings":              warnings,
     }

@@ -64,7 +64,7 @@ WHATSHAP_BINARY = Path(os.getenv("WHATSHAP_BINARY",
 # In Docker: set LLM_BASE_URL in docker-compose.yml or .env
 # On AWS:    set LLM_BASE_URL to SageMaker endpoint or hosted vLLM instance
 # ---------------------------------------------------------------------------
-LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://172.29.127.170:8000/v1")
+LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://172.29.127.185:8000/v1")
 LLM_MODEL:    str = os.getenv("LLM_MODEL",    "qwen2.5-14b")
 LLM_API_KEY:  str = os.getenv("LLM_API_KEY",  "dummy")
 
@@ -130,92 +130,154 @@ class PipelineConfig(BaseModel):
 # Keys match the names used throughout the pipeline codebase.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Build-aware helper — resolves a VEP_ROOT-relative path for a given build
+# ---------------------------------------------------------------------------
+
+def _vep_path(subdir: str, build: str, filename: str) -> Path:
+    """
+    Returns VEP_ROOT / subdir / grch38_or_grch37 / filename.
+    build must be "GRCh38" or "GRCh37".
+    """
+    folder = "grch37" if build.upper() == "GRCH37" else "grch38"
+    return VEP_ROOT / subdir / folder / filename
+
+
+# ---------------------------------------------------------------------------
+# DATABASE_PATHS — required files, build-independent
+# (all VEP plugin data is now in _vep_path(); only truly build-agnostic
+#  files live here — HPO, ClinGen, HGNC, gnomAD constraint, ChromaDB)
+# ---------------------------------------------------------------------------
+
 DATABASE_PATHS: dict = {
 
-    # --- VEP cache (homo_sapiens 115 GRCh38, already downloaded) ------------
+    # VEP cache roots (both builds present)
     "vep_cache":          VEP_ROOT / "homo_sapiens" / "115_GRCh38",
+    "vep_cache_grch37":   VEP_ROOT / "homo_sapiens" / "115_GRCh37",
 
-    # --- ClinVar (already in .vep/clinvar/) ----------------------------------
-    "clinvar_vcf":        VEP_ROOT / "clinvar" / "clinvar.vcf.gz",
-    "clinvar_vcf_tbi":    VEP_ROOT / "clinvar" / "clinvar.vcf.gz.tbi",
-
-    # --- dbNSFP 5.3.1a (already in .vep/dbnsfp/) ----------------------------
-    # NOTE: README referenced 4.4a; we have 5.3.1a — path corrected here
-    "dbnsfp":             VEP_ROOT / "dbnsfp" / "dbNSFP5.3.1a_grch38.gz",
-    "dbnsfp_tbi":         VEP_ROOT / "dbnsfp" / "dbNSFP5.3.1a_grch38.gz.tbi",
-
-    # --- gnomAD (already in .vep/gnomad/) ------------------------------------
-    # tabbed TSV format (not the full VCF — used for allele frequency lookup)
-    "gnomad_tabbed":      VEP_ROOT / "gnomad" / "gnomad.ch.genomesv3.tabbed.tsv.gz",
-    "gnomad_tabbed_tbi":  VEP_ROOT / "gnomad" / "gnomad.ch.genomesv3.tabbed.tsv.gz.tbi",
-    # Constraint metrics (pLI, LOEUF) — need to download separately (small file)
+    # gnomAD constraint (pLI/LOEUF) — build-independent gene-level file
     "gnomad_constraint":  DATABASE_DIR / "gnomad" / "gnomad.v2.1.1.lof_metrics.by_gene.txt",
 
-    # --- SpliceAI (already in .vep/spliceai/) --------------------------------
-    "spliceai_snv":       VEP_ROOT / "spliceai" / "spliceai_scores.masked.snv.hg38.vcf.gz",
-    "spliceai_snv_tbi":   VEP_ROOT / "spliceai" / "spliceai_scores.masked.snv.hg38.vcf.gz.tbi",
-    "spliceai_indel":     VEP_ROOT / "spliceai" / "spliceai_scores.masked.indel.hg38.vcf.gz",
-    "spliceai_indel_tbi": VEP_ROOT / "spliceai" / "spliceai_scores.masked.indel.hg38.vcf.gz.tbi",
-
-    # --- LOFTEE (already in .vep/loftee/) ------------------------------------
-    "loftee_dir":                VEP_ROOT / "loftee",
-    "loftee_human_ancestor_fa":  VEP_ROOT / "loftee" / "human_ancestor.fa.gz",
-    "loftee_gerp_scores":        VEP_ROOT / "loftee" / "gerp_conservation_scores.homo_sapiens.GRCh38.bw",
-
-    # --- VEP Plugins dir -----------------------------------------------------
-    "vep_plugins_dir":    VEP_ROOT / "Plugins",
-
-    # --- HPO (downloaded) ----------------------------------------------------
+    # HPO
     "hpo_obo":            DATABASE_DIR / "hpo" / "hp.obo",
     "hpo_annotations":    DATABASE_DIR / "hpo" / "phenotype.hpoa",
 
-    # --- ClinGen (downloaded) ------------------------------------------------
+    # ClinGen
     "clingen_validity":   DATABASE_DIR / "clingen" / "gene_disease_validity.csv",
 
-    # --- HGNC (downloaded) ---------------------------------------------------
+    # HGNC
     "hgnc":               DATABASE_DIR / "hgnc" / "hgnc_complete_set.txt",
 }
 
-# Optional databases — pipeline degrades gracefully when absent.
-# Each entry notes which agent/phase needs it and how to obtain it.
+# ---------------------------------------------------------------------------
+# Build-aware DATABASE_PATHS — call get_database_paths(genome_build) at
+# runtime to get the full merged dict for a specific build.
+# ---------------------------------------------------------------------------
+
+def get_database_paths(genome_build: str = "GRCh38") -> dict:
+    """
+    Returns DATABASE_PATHS merged with all build-specific plugin paths.
+    Use this everywhere instead of DATABASE_PATHS directly when you need
+    a VEP plugin path.
+
+    genome_build: "GRCh38" or "GRCh37"
+    """
+    b = genome_build  # shorthand
+
+    build_paths = {
+        # --- ClinVar ---------------------------------------------------------
+        "clinvar_vcf":        _vep_path("clinvar",  b, "clinvar.vcf.gz"),
+        "clinvar_vcf_tbi":    _vep_path("clinvar",  b, "clinvar.vcf.gz.tbi"),
+
+        # --- dbNSFP ----------------------------------------------------------
+        "dbnsfp": (
+            _vep_path("dbnsfp", b, "dbNSFP5.3.1a_grch37.gz")
+            if b.upper() == "GRCH37"
+            else _vep_path("dbnsfp", b, "dbNSFP5.3.1a_grch38.gz")
+        ),
+        "dbnsfp_tbi": (
+            _vep_path("dbnsfp", b, "dbNSFP5.3.1a_grch37.gz.tbi")
+            if b.upper() == "GRCH37"
+            else _vep_path("dbnsfp", b, "dbNSFP5.3.1a_grch38.gz.tbi")
+        ),
+
+        # --- gnomAD tabbed ---------------------------------------------------
+        "gnomad_tabbed": (
+            _vep_path("gnomad", b, "gnomad.genomes.tabbed.tsv.gz")
+            if b.upper() == "GRCH37"
+            else _vep_path("gnomad", b, "gnomad.ch.genomesv3.tabbed.tsv.gz")
+        ),
+        "gnomad_tabbed_tbi": (
+            _vep_path("gnomad", b, "gnomad.genomes.tabbed.tsv.gz.tbi")
+            if b.upper() == "GRCH37"
+            else _vep_path("gnomad", b, "gnomad.ch.genomesv3.tabbed.tsv.gz.tbi")
+        ),
+
+        # --- SpliceAI --------------------------------------------------------
+        "spliceai_snv": (
+            _vep_path("spliceai", b, "spliceai_scores.masked.snv.hg19.vcf.gz")
+            if b.upper() == "GRCH37"
+            else _vep_path("spliceai", b, "spliceai_scores.masked.snv.hg38.vcf.gz")
+        ),
+        "spliceai_snv_tbi": (
+            _vep_path("spliceai", b, "spliceai_scores.masked.snv.hg19.vcf.gz.tbi")
+            if b.upper() == "GRCH37"
+            else _vep_path("spliceai", b, "spliceai_scores.masked.snv.hg38.vcf.gz.tbi")
+        ),
+        "spliceai_indel": (
+            _vep_path("spliceai", b, "spliceai_scores.masked.indel.hg19.vcf.gz")
+            if b.upper() == "GRCH37"
+            else _vep_path("spliceai", b, "spliceai_scores.masked.indel.hg38.vcf.gz")
+        ),
+        "spliceai_indel_tbi": (
+            _vep_path("spliceai", b, "spliceai_scores.masked.indel.hg19.vcf.gz.tbi")
+            if b.upper() == "GRCH37"
+            else _vep_path("spliceai", b, "spliceai_scores.masked.indel.hg38.vcf.gz.tbi")
+        ),
+
+        # --- LOFTEE ----------------------------------------------------------
+        "loftee_dir":               VEP_ROOT / "loftee",   # plugin scripts are build-agnostic
+        "loftee_human_ancestor_fa": _vep_path("loftee", b, "human_ancestor.fa.gz"),
+        "loftee_gerp": (
+            _vep_path("loftee", b, "GERP_scores.final.sorted.txt.gz")
+            if b.upper() == "GRCH37"
+            else _vep_path("loftee", b, "gerp_conservation_scores.homo_sapiens.GRCh38.bw")
+        ),
+
+        # --- VEP plugins dir (build-agnostic) --------------------------------
+        "vep_plugins_dir":          VEP_ROOT / "Plugins",
+    }
+
+    return {**DATABASE_PATHS, **build_paths}
+
+
+# ---------------------------------------------------------------------------
+# OPTIONAL_DATABASE_PATHS — pipeline degrades gracefully when absent
+# These are all build-independent (reference FASTAs, Orphanet, OMIM, etc.)
+# ---------------------------------------------------------------------------
+
 OPTIONAL_DATABASE_PATHS: dict = {
 
-    # Needed for WhatsHap phasing (phasing node, Phase 3)
-    # wget https://ftp.ncbi.nlm.nih.gov/genomes/refseq/vertebrate_mammalian/Homo_sapiens/
-    #   all_assembly_versions/GCF_000001405.40_GRCh38.p14/
-    #   GCF_000001405.40_GRCh38.p14_genomic.fna.gz -O data/reference/GRCh38.fa.gz
-    # then: gunzip data/reference/GRCh38.fa.gz && samtools faidx data/reference/GRCh38.fa
-    "reference_fasta":     REFERENCE_DIR / "GRCh38.fa",
-    "reference_fasta_fai": REFERENCE_DIR / "GRCh38.fa.fai",
-    "reference_fasta_grch37": REFERENCE_DIR / "GRCh37.fa",
-    "reference_fasta_fai_grch37": REFERENCE_DIR / "GRCh37.fa.fai",
+    # Reference FASTAs (WhatsHap phasing)
+    "reference_fasta":             REFERENCE_DIR / "GRCh38.fa",
+    "reference_fasta_fai":         REFERENCE_DIR / "GRCh38.fa.fai",
+    "reference_fasta_grch37":      REFERENCE_DIR / "GRCh37.fa",
+    "reference_fasta_fai_grch37":  REFERENCE_DIR / "GRCh37.fa.fai",
 
-    # Needed for Agent 9 (PP4/BP5 — phenotype/disease matching)
-    # Manual download from https://www.orphadata.com/genes/
-    # Files: en_product6.xml → genes_diseases.xml, en_product9_ages.xml → epidemiology.xml
-    
-    "orphanet_genes":           DATABASE_DIR / "orphanet" / "genes_diseases.xml",
-    "orphanet_inheritance_tsv": DATABASE_DIR / "orphanet" / "orphanet_disease_gene_inheritance.tsv",
-    "omim_morbidmap":           DATABASE_DIR / "omim_tmp"     / "morbidmap.txt",
+    # Orphanet + OMIM (inheritance lookup — hpo_matcher.py)
+    "orphanet_genes":              DATABASE_DIR / "orphanet" / "genes_diseases.xml",
+    "orphanet_inheritance_tsv":    DATABASE_DIR / "orphanet" / "orphanet_disease_gene_inheritance.tsv",
+    "omim_morbidmap":              DATABASE_DIR / "omim_tmp" / "morbidmap.txt",
 
-    # Needed for Agent 8 (PM4/BP3 — in-repeat indel evidence)
-    # wget "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/rmsk.txt.gz"
-    # then convert to sorted BED: zcat rmsk.txt.gz | awk '{print $6"\t"$7"\t"$8"\t"$13}' \
-    #   | sort -k1,1 -k2,2n | bgzip > repeatmasker.bed.gz && tabix -p bed repeatmasker.bed.gz
-    "repeatmasker":       DATABASE_DIR / "repeatmasker" / "repeatmasker.bed.gz",
+    # RepeatMasker (Agent 8 — PM4/BP3)
+    "repeatmasker":                DATABASE_DIR / "repeatmasker" / "repeatmasker.bed.gz",
 
-    # Needed for Agent 5 (PM1 — critical functional domain evidence)
-    # Download UniProt human reviewed features TSV from:
-    # https://www.uniprot.org/uniprot/?query=organism:9606+reviewed:yes&format=tsv
-    # Include columns: Gene names, Features (Active site, Binding site, Domain, etc.)
-    "uniprot":            DATABASE_DIR / "uniprot" / "uniprot_human_features.tsv",
+    # UniProt (Agent 5 — PM1)
+    "uniprot":                     DATABASE_DIR / "uniprot" / "uniprot_human_features.tsv",
 
-    # CADD raw scores — NOT needed separately.
-    # CADD_phred is available as a column in dbNSFP 5.3.1a (already present).
-    # Only add this if you need CADD for variants outside dbNSFP coverage.
-    "cadd_snv":           DATABASE_DIR / "cadd" / "whole_genome_SNVs.tsv.gz",
+    # CADD raw (only if needed outside dbNSFP coverage)
+    "cadd_snv":                    DATABASE_DIR / "cadd" / "whole_genome_SNVs.tsv.gz",
 }
-
 
 # ---------------------------------------------------------------------------
 # VEP runtime settings  — used by the vep_runner node
@@ -270,59 +332,46 @@ VEP_SETTINGS: dict = {
 # Convenience helper — check which required databases are missing
 # ---------------------------------------------------------------------------
 
-def check_databases(verbose: bool = True) -> Dict[str, bool]:
+def check_databases(verbose: bool = True, genome_build: str = "GRCh38") -> Dict[str, bool]:
     """
-    Check which DATABASE_PATHS (required) and OPTIONAL_DATABASE_PATHS entries
-    exist on disk. Prints a summary and returns combined {key: True/False} dict.
+    Check which paths exist on disk for a given genome build.
+    Pass genome_build="GRCh37" to check GRCh37 plugin paths instead.
     """
     status: Dict[str, bool] = {}
+    all_paths = {**get_database_paths(genome_build), **OPTIONAL_DATABASE_PATHS}
 
-    required_missing = []
-    for key, path in DATABASE_PATHS.items():
+    required_keys = set(DATABASE_PATHS.keys()) | set(get_database_paths(genome_build).keys())
+
+    missing_required = []
+    missing_optional = []
+
+    for key, path in all_paths.items():
         exists = Path(path).exists()
         status[key] = exists
         if not exists:
-            required_missing.append((key, path))
-
-    optional_missing = []
-    for key, path in OPTIONAL_DATABASE_PATHS.items():
-        exists = Path(path).exists()
-        status[key] = exists
-        if not exists:
-            optional_missing.append((key, path))
+            if key in required_keys:
+                missing_required.append((key, path))
+            else:
+                missing_optional.append((key, path))
 
     if verbose:
-        if required_missing:
+        print(f"\n=== Database check for {genome_build} ===")
+        if missing_required:
             print("\n[REQUIRED — MISSING]")
-            for key, path in required_missing:
+            for key, path in missing_required:
                 print(f"  {key}: {path}")
         else:
             print("\n[REQUIRED] All present ✓")
 
-        if optional_missing:
+        if missing_optional:
             print("\n[OPTIONAL — not yet downloaded]")
-            for key, path in optional_missing:
+            for key, path in missing_optional:
                 print(f"  {key}: {path}")
 
-        req_total  = len(DATABASE_PATHS)
-        req_ok     = req_total - len(required_missing)
-        opt_total  = len(OPTIONAL_DATABASE_PATHS)
-        opt_ok     = opt_total - len(optional_missing)
-        print(f"\nRequired : {req_ok}/{req_total} present")
-        print(f"Optional : {opt_ok}/{opt_total} present")
+        print(f"\nRequired : {len(required_keys) - len(missing_required)}/{len(required_keys)} present")
+        print(f"Optional : {len(OPTIONAL_DATABASE_PATHS) - len(missing_optional)}/{len(OPTIONAL_DATABASE_PATHS)} present")
 
     return status
-
-
-if __name__ == "__main__":
-    print("=== Database path check ===")
-    results = check_databases(verbose=True)
-    missing = [k for k, v in results.items() if not v]
-    present = [k for k, v in results.items() if v]
-    print(f"\nPresent : {len(present)}/{len(results)}")
-    print(f"Missing : {len(missing)}/{len(results)}")
-    if missing:
-        print("\nMissing keys:", missing)
 
 ###REPORT####
 
