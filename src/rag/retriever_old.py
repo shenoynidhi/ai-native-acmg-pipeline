@@ -31,9 +31,9 @@ _ef = None
 def _get_client():
     global _client
     if _client is None:
+        import chromadb
         from src.config import CHROMADB_DIR
-        from src.rag.chromadb_client import get_chromadb_client
-        _client = get_chromadb_client(CHROMADB_DIR)
+        _client = chromadb.PersistentClient(path=str(CHROMADB_DIR))
     return _client
 
 
@@ -311,4 +311,3 @@ def check_collections() -> dict[str, bool]:
         status[name] = name in existing
 
     return status
-

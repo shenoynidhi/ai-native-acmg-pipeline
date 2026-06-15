@@ -55,6 +55,10 @@ def _build_vep_command(
     assembly    = "GRCh37" if build_upper == "GRCH37" else "GRCh38"
     cache_key   = "vep_cache_grch37" if build_upper == "GRCH37" else "vep_cache"
 
+    # Reference FASTA (required for HGVSc/HGVSp generation)
+    fasta_key = "reference_fasta_grch37" if build_upper == "GRCH37" else "reference_fasta"
+    reference_fasta = db.get(fasta_key)
+
     loftee_gerp_flag = _LOFTEE_GERP_FLAG.get(assembly, "gerp_bigwig")
 
     cmd = [
@@ -84,11 +88,15 @@ def _build_vep_command(
         "--hgvs",
         "--hgvsg",
         "--everything",
+        # NOTE: Add "--merged" after installing RefSeq cache with:
+        #   vep_install -a cf -s homo_sapiens -y GRCh38 --REFSEQ --CACHEDIR /workspace/data/.vep
+        #   vep_install -a cf -s homo_sapiens -y GRCh37 --REFSEQ --CACHEDIR /workspace/data/.vep
 
-        # dbNSFP plugin
+        # dbNSFP plugin (consequence=ALL to include splice/frameshift variants)
         "--plugin", (
             f"dbNSFP,{db['dbnsfp']},"
             + ",".join(_DBNSFP_FIELDS)
+            + ",consequence=ALL"
         ),
 
         # SpliceAI plugin
@@ -116,6 +124,16 @@ def _build_vep_command(
             "fields=CLNSIG%CLNREVSTAT%CLNDN%CLNACC"
         ),
     ]
+
+    # Add --fasta only if reference file exists (required for complete HGVSc/HGVSp)
+    if reference_fasta and Path(reference_fasta).exists():
+        cmd.extend(["--fasta", str(reference_fasta)])
+    else:
+        logger.warning(
+            f"Reference FASTA not found at {reference_fasta}. "
+            "HGVSc/HGVSp may be incomplete for some variants."
+        )
+
     return cmd
 
 
@@ -183,3 +201,4 @@ def vep_runner_node(state: VariantState) -> dict:
         "vep_already_annotated": False,
         "warnings":              warnings,
     }
+

@@ -121,7 +121,7 @@ PRIMARY_COLUMNS = [
     ("Consequence",         "consequence"),
     ("Classification",      "final_classification"),
     ("Criteria",            "criteria_applied"),
-    ("Confidence",          "confidence"),
+    ("Classification Confidence", "confidence"),
     ("Phenotype Score",     "phenotype_score"),
     ("gnomAD AF",           "max_gnomad_af"),
     ("ClinVar",             "clinvar_clnsig"),
@@ -168,6 +168,9 @@ def _state_to_row(state: dict, rank: int) -> dict:
     phenotype_score = state.get("phenotype_score")
     gnomad_af       = state.get("max_gnomad_af", 0.0)
 
+    # Normalise citations: list for HTML, string for xlsx/tsv
+    citations_list = _normalise_citations("; ".join(citations) if citations else "")
+
     return {
         # --- primary ---
         "rank":                 rank,
@@ -200,13 +203,18 @@ def _state_to_row(state: dict, rank: int) -> dict:
         "recommended_followup":       state.get("recommended_followup") or "",
         "reclassification_conditions":state.get("reclassification_conditions") or "",
         "warnings_str":               "; ".join(warnings) if warnings else "",
-        "citations_str": citations if citations else [],  # keep as list
+        "citations_str":              "; ".join(citations_list),       # string → xlsx/tsv
+        "citations_normalised":       citations_list,                   # list   → HTML template
 
         # raw state reference (for HTML template logic)
         "_has_unevaluated": bool(unevaluated),
         "_has_warnings":    bool(warnings),
         "_classification":  state.get("final_classification") or "VUS",
         "_session_id":      state.get("session_id", ""),
+
+        #Additions
+        "tavtigian_points":         state.get("tavtigian_points"),
+        "tavtigian_classification": state.get("tavtigian_classification") or "",
     }
 
 
@@ -373,27 +381,27 @@ def _normalise_citations(citations_str: str) -> list:
     """
     if not citations_str:
         return []
-    
+
     seen = set()
     result = []
-    
+
     for raw in citations_str.split(';'):
         cite = raw.strip()
         if not cite:
             continue
-        
+
         # Normalise bare PMIDs → "PubMed PMID: XXXXXXXX"
         import re
         pmid_match = re.match(r'^PMID\s*:?\s*(\d+)$', cite, re.IGNORECASE)
         if pmid_match:
             cite = f"PubMed PMID: {pmid_match.group(1)}"
-        
+
         # Deduplicate case-insensitively
         key = cite.lower()
         if key not in seen:
             seen.add(key)
             result.append(cite)
-    
+
     return result
 # ---------------------------------------------------------------------------
 # HTML writer — Jinja2 template

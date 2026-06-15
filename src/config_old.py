@@ -24,9 +24,6 @@ from dotenv import load_dotenv
 # In Docker, env vars are injected directly so .env is ignored.
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-# Suppress ChromaDB telemetry errors (cosmetic stderr noise from version mismatch)
-os.environ["CHROMA_TELEMETRY"] = "0"
-
 # ---------------------------------------------------------------------------
 # Base directories — all overridable via environment variables
 # ---------------------------------------------------------------------------

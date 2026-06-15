@@ -32,9 +32,10 @@ logger = logging.getLogger(__name__)
 
 def _get_client():
     """Return a persistent ChromaDB client pointed at CHROMADB_DIR."""
+    import chromadb
     from src.config import CHROMADB_DIR
-    from src.rag.chromadb_client import get_chromadb_client
-    return get_chromadb_client(CHROMADB_DIR)
+    CHROMADB_DIR.mkdir(parents=True, exist_ok=True)
+    return chromadb.PersistentClient(path=str(CHROMADB_DIR))
 
 
 def _get_ef():

@@ -536,8 +536,7 @@ def build_acmg_guidelines_collection(chromadb_dir: Path = CHROMADB_DIR) -> None:
     Build (or rebuild) the acmg_guidelines ChromaDB collection.
     Safe to re-run — deletes and recreates the collection.
     """
-    from src.rag.chromadb_client import get_chromadb_client
-    client = get_chromadb_client(chromadb_dir)
+    client = chromadb.PersistentClient(path=str(chromadb_dir))
     ef = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name=EMBEDDING_MODEL
     )
@@ -568,8 +567,7 @@ def build_acmg_guidelines_collection(chromadb_dir: Path = CHROMADB_DIR) -> None:
 
 def verify_acmg_guidelines_collection(chromadb_dir: Path = CHROMADB_DIR) -> bool:
     """Quick sanity check — query PVS1 and confirm it returns."""
-    from src.rag.chromadb_client import get_chromadb_client
-    client = get_chromadb_client(chromadb_dir)
+    client = chromadb.PersistentClient(path=str(chromadb_dir))
     ef = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name=EMBEDDING_MODEL
     )
@@ -588,4 +586,3 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     build_acmg_guidelines_collection()
     verify_acmg_guidelines_collection()
-

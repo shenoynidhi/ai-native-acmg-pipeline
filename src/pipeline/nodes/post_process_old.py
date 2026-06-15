@@ -86,82 +86,6 @@ _CLNREVSTAT_STARS = {
 
 
 # ---------------------------------------------------------------------------
-# Genomic HGVS generation (fallback when HGVSc is blank)
-# ---------------------------------------------------------------------------
-
-def _generate_genomic_hgvs(chrom: str, pos: int, ref: str, alt: str, genome_build: str = "GRCh38") -> str:
-    """
-    Generate genomic HGVS notation (NC_ accession) for variants missing HGVSc.
-
-    Args:
-        chrom: Chromosome (e.g., "7" or "chr7")
-        pos: Position (1-based)
-        ref: Reference allele
-        alt: Alternate allele
-        genome_build: "GRCh38" or "GRCh37"
-
-    Returns:
-        Genomic HGVS string like "NC_000007.14:g.117548628A>G"
-    """
-    # RefSeq chromosome accessions (GRCh38/hg38)
-    CHROM_ACCESSIONS_38 = {
-        "1": "NC_000001.11", "2": "NC_000002.12", "3": "NC_000003.12",
-        "4": "NC_000004.12", "5": "NC_000005.10", "6": "NC_000006.12",
-        "7": "NC_000007.14", "8": "NC_000008.11", "9": "NC_000009.12",
-        "10": "NC_000010.11", "11": "NC_000011.10", "12": "NC_000012.12",
-        "13": "NC_000013.11", "14": "NC_000014.9", "15": "NC_000015.10",
-        "16": "NC_000016.10", "17": "NC_000017.11", "18": "NC_000018.10",
-        "19": "NC_000019.10", "20": "NC_000020.11", "21": "NC_000021.9",
-        "22": "NC_000022.11", "X": "NC_000023.11", "Y": "NC_000024.10",
-        "MT": "NC_012920.1", "M": "NC_012920.1"
-    }
-
-    # RefSeq chromosome accessions (GRCh37/hg19)
-    CHROM_ACCESSIONS_37 = {
-        "1": "NC_000001.10", "2": "NC_000002.11", "3": "NC_000003.11",
-        "4": "NC_000004.11", "5": "NC_000005.9", "6": "NC_000006.11",
-        "7": "NC_000007.13", "8": "NC_000008.10", "9": "NC_000009.11",
-        "10": "NC_000010.10", "11": "NC_000011.9", "12": "NC_000012.11",
-        "13": "NC_000013.10", "14": "NC_000014.8", "15": "NC_000015.9",
-        "16": "NC_000016.9", "17": "NC_000017.10", "18": "NC_000018.9",
-        "19": "NC_000019.9", "20": "NC_000020.10", "21": "NC_000021.8",
-        "22": "NC_000022.10", "X": "NC_000023.10", "Y": "NC_000024.9",
-        "MT": "NC_012920.1", "M": "NC_012920.1"
-    }
-
-    accessions = CHROM_ACCESSIONS_37 if genome_build.upper() == "GRCH37" else CHROM_ACCESSIONS_38
-    chrom_clean = chrom.replace("chr", "").upper()
-    accession = accessions.get(chrom_clean, f"chr{chrom_clean}")
-
-    # Determine HGVS type based on variant
-    if len(ref) == 1 and len(alt) == 1:
-        # SNV: g.117548628A>G
-        return f"{accession}:g.{pos}{ref}>{alt}"
-    elif len(ref) > len(alt):
-        # Deletion
-        if len(alt) == 1:  # Simple deletion
-            del_start = pos + 1
-            del_end = pos + len(ref) - 1
-            if del_start == del_end:
-                return f"{accession}:g.{del_start}del"
-            else:
-                return f"{accession}:g.{del_start}_{del_end}del"
-        else:
-            # Delins
-            return f"{accession}:g.{pos}_{pos + len(ref) - 1}delins{alt}"
-    elif len(alt) > len(ref):
-        # Insertion
-        if len(ref) == 1:  # Simple insertion
-            return f"{accession}:g.{pos}_{pos + 1}ins{alt[1:]}"
-        else:
-            # Delins
-            return f"{accession}:g.{pos}_{pos + len(ref) - 1}delins{alt}"
-    else:
-        # Same length delins
-        return f"{accession}:g.{pos}_{pos + len(ref) - 1}delins{alt}"
-
-
-# ---------------------------------------------------------------------------
 # Zygosity extraction from VCF GT field
 # ---------------------------------------------------------------------------
 
@@ -591,10 +515,6 @@ def _parse_vep_row(
     hgvsc = _str(row.get("HGVSc", "") or "")
     hgvsp = _str(row.get("HGVSp", "") or "")
 
-    # Fallback: generate genomic HGVS when HGVSc is blank (e.g., for intronic variants)
-    if not hgvsc and chrom and pos_int and ref and alt:
-        hgvsc = _generate_genomic_hgvs(chrom, pos_int, ref, alt, base_state.get("genome_build", "GRCh38"))
-
     # Gene-level context from reference databases
     constraint = gnomad_constraint.get(gene, {})
     pli   = constraint.get("pLI")
@@ -770,39 +690,11 @@ def post_process_node(state: VariantState) -> dict:
                     "downstream_gene_variant",
                     "intergenic_variant",
                     "intron_variant",
+                    "synonymous_variant",  # unless config.include_synonymous=True
                 }
-
                 if consequence in EXCLUDED_CONSEQUENCES:
                     logger.debug(f"[{session_id}] Filtered out {vid}: {consequence}")
                     continue
-
-                # Special handling for synonymous variants: only keep if likely to affect splicing
-                # Keep if SpliceAI ≥ 0.2 OR within 3bp of exon boundary
-                if consequence == "synonymous_variant":
-                    spliceai = variant_state.get("max_spliceai", 0.0) or 0.0
-                    keep_variant = False
-
-                    # Criterion 1: SpliceAI ≥ 0.2 (likely splice-altering)
-                    if spliceai >= 0.2:
-                        logger.debug(f"[{session_id}] Retained synonymous {vid}: SpliceAI={spliceai:.3f}")
-                        keep_variant = True
-                    else:
-                        # Criterion 2: Check if near exon-intron boundary
-                        # VEP DISTANCE field indicates distance to nearest feature
-                        # For synonymous variants AT exon boundaries, DISTANCE is usually 0 or near 0
-                        distance = row.get("DISTANCE", "")
-                        if distance and distance != "-":
-                            try:
-                                dist_val = int(distance)
-                                if dist_val <= 3:  # Within 3bp of boundary
-                                    logger.debug(f"[{session_id}] Retained synonymous {vid}: DISTANCE={dist_val}bp from boundary")
-                                    keep_variant = True
-                            except ValueError:
-                                pass
-
-                    if not keep_variant:
-                        logger.debug(f"[{session_id}] Filtered synonymous {vid}: SpliceAI={spliceai:.3f} < 0.2, not at boundary")
-                        continue
 
                 seen_variant_ids.add(vid)
                 parsed_variants.append(variant_state)

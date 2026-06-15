@@ -356,7 +356,126 @@
     }
     .disclaimer strong { color: var(--ink-mid); }
 
-    /* ── Print styles ───────────────────────────────────────────────────── */
+    /* ── Tavtigian gauge ─────────────────────────────────────────────────── */
+    .tavtigian-gauge-wrap {
+      margin-top: 12px;
+      padding: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .tavtigian-gauge-wrap h4 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      color: var(--ink);
+    }
+    .tavtigian-gauge { width: 100%; max-width: 520px; }
+
+    .gauge-track {
+      position: relative;
+      height: 32px;
+      border-radius: 4px;
+      overflow: visible;
+      background: #f5f5f5;
+      border: 1px solid var(--border);
+    }
+
+    .gauge-zone {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 600;
+      color: rgba(0,0,0,0.5);
+      border-right: 2px solid #fff;
+    }
+    .gauge-zone:last-child { border-right: none; }
+
+    /* Zone colors matching classification badges exactly */
+    .gz-benign { background: #C8E6C9; }  /* soft green */
+    .gz-lb     { background: #DCEDC8; }  /* soft lime */
+    .gz-vus    { background: #FFF9C4; }  /* soft yellow */
+    .gz-lp     { background: #FFE0B2; }  /* soft orange */
+    .gz-path   { background: #FFCDD2; }  /* soft red */
+
+    .gauge-marker {
+      position: absolute;
+      top: -4px;
+      bottom: -4px;
+      width: 4px;
+      background: #1a1a1a;
+      border-radius: 2px;
+      transform: translateX(-50%);
+      z-index: 10;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+
+    .gauge-marker::before {
+      content: '';
+      position: absolute;
+      top: -6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 8px solid #1a1a1a;
+    }
+
+    .gauge-scale {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--ink-mid);
+    }
+    .gauge-scale span {
+      position: relative;
+    }
+    .gauge-scale span::before {
+      content: '';
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 1px;
+      height: 4px;
+      background: var(--ink-light);
+    }
+
+    .tavtigian-score-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .tav-points {
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--ink);
+      font-size: 15px;
+    }
+    .tav-badge {
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-weight: 600;
+      font-size: 11px;
+    }
+    .tav-badge.Pathogenic        { background: #FFCDD2; color: #B71C1C; }
+    .tav-badge.Likely_Pathogenic { background: #FFE0B2; color: #E65100; }
+    .tav-badge.VUS               { background: #FFF9C4; color: #F57F17; }
+    .tav-badge.Likely_Benign     { background: #DCEDC8; color: #558B2F; }
+    .tav-badge.Benign            { background: #C8E6C9; color: #1B5E20; }
+
+    .tav-note { color: var(--ink-light); font-size: 11px; }
     @media print {
       body { background: #fff; font-size: 11px; }
       .page-body { padding: 0 8px; max-width: 100%; }
@@ -471,9 +590,10 @@
           <th>HGVSc</th>
           <th>HGVSp</th>
           <th>Consequence</th>
-          <th>Classification</th>
+          <th>ACMG Class</th>
+          <th>Bayesian Class</th>
           <th>Criteria</th>
-          <th>Classification Confidence</th>
+          <th>Classif. Confidence</th>
           <th>Pheno Score</th>
           <th>gnomAD AF</th>
           <th>ClinVar</th>
@@ -495,6 +615,18 @@
               {{ row.final_classification | replace('_', ' ') }}
             </span>
           </td>
+          <td>
+            {% if row.tavtigian_classification %}
+            <span class="badge badge-{{ row.tavtigian_classification }}">
+              {{ row.tavtigian_classification | replace('_', ' ') }}
+            </span>
+            <span style="font-size:10px;color:var(--ink-mid);font-family:var(--font-mono)">
+              ({{ row.tavtigian_points }}pts)
+            </span>
+            {% else %}
+            —
+            {% endif %}
+          </td>
           <td class="criteria-cell">
             {{ row.criteria_applied }}
             {% if row._has_unevaluated %}
@@ -512,6 +644,52 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+
+  <!-- Classification Systems Info -->
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:20px">
+    <h3 style="font-size:14px;margin:0 0 12px 0;color:var(--accent)">Understanding Classification Systems</h3>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div>
+        <h4 style="font-size:12px;font-weight:700;margin:0 0 6px 0;color:var(--ink)">
+          ACMG Class (Primary Classification)
+        </h4>
+        <p style="font-size:12px;line-height:1.6;color:var(--ink-mid);margin:0">
+          Based on <strong>ACMG/AMP 2015 guidelines (Richards et al.)</strong>. Uses Table 5 combination rules
+          to classify variants into 5 tiers: <strong>Pathogenic</strong> (P), <strong>Likely Pathogenic</strong> (LP),
+          <strong>Variant of Uncertain Significance</strong> (VUS), <strong>Likely Benign</strong> (LB), and <strong>Benign</strong> (B).
+          This is the <strong>clinically authoritative classification</strong> used for reporting.
+        </p>
+        <p style="font-size:11px;line-height:1.5;color:var(--ink-light);margin:6px 0 0 0">
+          <strong>Decision logic:</strong> Boolean rules (e.g., "PVS1 + PM2 = LP" or "PM2 alone = VUS").
+          Criteria must meet specific combinations from Table 5.
+        </p>
+      </div>
+
+      <div>
+        <h4 style="font-size:12px;font-weight:700;margin:0 0 6px 0;color:var(--ink)">
+          Bayesian Class (Supplementary Score)
+        </h4>
+        <p style="font-size:12px;line-height:1.6;color:var(--ink-mid);margin:0">
+          Based on <strong>Tavtigian 2020 point system</strong>. Assigns numeric weights to each criterion
+          (PVS=+8, PS=+4, PM=+2, PP=+1, BP=-1, BS=-4, BA=-8) and sums to a total score.
+          Classification thresholds: ≥10=P, 6-9=LP, 0-5=VUS, -1 to -6=LB, ≤-7=B.
+        </p>
+        <p style="font-size:11px;line-height:1.5;color:var(--ink-light);margin:6px 0 0 0">
+          <strong>Purpose:</strong> Provides <strong>granularity within tiers</strong> (e.g., "VUS at 4 pts vs VUS at 1 pt").
+          Useful for prioritizing variants and tracking borderline cases. <strong>Not used for clinical reporting.</strong>
+        </p>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <p style="font-size:11px;line-height:1.6;color:var(--ink-mid);margin:0">
+        <strong>Why two systems?</strong> ACMG Table 5 is the clinical standard but collapses all uncertain variants into "VUS"
+        with no sub-tiers. Tavtigian's point system adds resolution — a VUS at 4 points (close to LP threshold of 6)
+        is prioritized differently than a VUS at 1 point. <strong>When they disagree, ACMG Table 5 takes precedence.</strong>
+      </p>
+    </div>
   </div>
 
   <!-- Disclaimer -->
@@ -577,6 +755,68 @@
           </div>
           {% endfor %}
         </div>
+        {% if row.tavtigian_points is not none %}
+        <div class="tavtigian-gauge-wrap">
+          <h4>Bayesian Score (Tavtigian 2020 Point System)</h4>
+
+          <div class="tavtigian-gauge">
+            {# Calculate zone widths based on correct Tavtigian thresholds #}
+            {# Range: -10 to +12 = 22 points total #}
+            {# Benign: -10 to -7 = 3pts (13.6%) #}
+            {# Likely Benign: -6 to -1 = 6pts (27.3%) #}
+            {# VUS: 0 to 5 = 6pts (27.3%) #}
+            {# Likely Path: 6 to 9 = 4pts (18.2%) #}
+            {# Pathogenic: 10 to 12 = 3pts (13.6%) #}
+
+            <div class="gauge-track">
+              <div class="gauge-zone gz-benign" style="left:0%; width:13.6%">
+                <span>B</span>
+              </div>
+              <div class="gauge-zone gz-lb" style="left:13.6%; width:27.3%">
+                <span>LB</span>
+              </div>
+              <div class="gauge-zone gz-vus" style="left:40.9%; width:27.3%">
+                <span>VUS</span>
+              </div>
+              <div class="gauge-zone gz-lp" style="left:68.2%; width:18.2%">
+                <span>LP</span>
+              </div>
+              <div class="gauge-zone gz-path" style="left:86.4%; width:13.6%">
+                <span>P</span>
+              </div>
+
+              {# Position marker based on actual point value #}
+              {% set min_pts = -10 %}
+              {% set max_pts = 12 %}
+              {% set range = max_pts - min_pts %}
+              {% set clipped = [min_pts, [row.tavtigian_points, max_pts] | min] | max %}
+              {% set pct = ((clipped - min_pts) / range * 100) | round(1) %}
+              <div class="gauge-marker" style="left:{{ pct }}%"></div>
+            </div>
+
+            {# Point scale below bar #}
+            <div class="gauge-scale">
+              <span>-10</span>
+              <span>-7</span>
+              <span>-1</span>
+              <span>0</span>
+              <span>+6</span>
+              <span>+10</span>
+              <span>+12</span>
+            </div>
+          </div>
+
+          {# Score summary line #}
+          <div class="tavtigian-score-line">
+            <span class="tav-points">{{ row.tavtigian_points }} pts</span>
+            <span>→</span>
+            <span class="tav-badge {{ row.tavtigian_classification }}">
+              {{ row.tavtigian_classification | replace('_', ' ') }}
+            </span>
+            <span class="tav-note">Quantitative evidence strength</span>
+          </div>
+        </div>
+        {% endif %}
         {% if row.matched_orphanet_disease %}
         <div class="detail-field" style="margin-top:8px">
           <span class="df-label">Matched Disease</span>
@@ -651,3 +891,4 @@ $(document).ready(function () {
 </script>
 </body>
 </html>
+

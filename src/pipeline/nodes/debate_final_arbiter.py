@@ -62,7 +62,8 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 # ---------------------------------------------------------------------------
 
 def _get_chroma_collection(name: str):
-    client = chromadb.PersistentClient(path=str(CHROMADB_DIR))
+    from src.rag.chromadb_client import get_chromadb_client
+    client = get_chromadb_client(CHROMADB_DIR)
     ef = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name=EMBEDDING_MODEL
     )
@@ -154,7 +155,7 @@ Output format — respond with valid JSON only, no markdown:
   "recommended_followup": "specific recommended tests or data that would strengthen or change the classification",
   "reclassification_conditions": "for VUS: what specific evidence would reclassify this variant; for P/LP/B/LB: conditions under which reclassification should be triggered",
   "debate_notes": "1-3 sentences on how the two advocate arguments were weighed",
-  "unevaluated_criteria_report": ["list of criteria not evaluated due to missing input, e.g. PP4_not_evaluated_no_clinical_history"]
+  "unevaluated_criteria_report": ["list of criteria not evaluated due to missing input, e.g. PP4_not_evaluated_no_phenotype_match, BP5_not_evaluated_no_alternate_molecular_diagnosis"]
 }}"""
 
 
@@ -525,3 +526,4 @@ def _validate_arbiter_output(raw: dict, state: VariantState, variant_id: str) ->
         "debate_notes":                       raw.get("debate_notes", ""),
         "unevaluated_criteria_report":        unevaluated_report,
     }
+

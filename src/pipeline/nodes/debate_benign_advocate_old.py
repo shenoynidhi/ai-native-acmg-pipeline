@@ -49,8 +49,7 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 # ---------------------------------------------------------------------------
 
 def _get_chroma_collection(name: str):
-    from src.rag.chromadb_client import get_chromadb_client
-    client = get_chromadb_client(CHROMADB_DIR)
+    client = chromadb.PersistentClient(path=str(CHROMADB_DIR))
     ef = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name=EMBEDDING_MODEL
     )
@@ -300,4 +299,3 @@ def _validate_advocate_output(raw: dict, variant_id: str) -> dict:
         "rag_evidence_used":            raw.get("rag_evidence_used", []),
         "confidence":                   confidence,
     }
-

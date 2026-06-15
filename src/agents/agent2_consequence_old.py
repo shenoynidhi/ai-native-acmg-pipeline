@@ -33,7 +33,6 @@ from typing import Optional
 
 from src.pipeline.state import VariantState
 from src.utils.llm_client import call_llm_json
-from src.utils.criteria_normalizer import normalize_strength
 
 logger = logging.getLogger(__name__)
 
@@ -367,19 +366,8 @@ def agent2_consequence(state: VariantState) -> dict:
             confidence     = llm_result.get("confidence", "MEDIUM")
             citations     += llm_result.get("citations", [])
 
-            # Normalize LLM output using shared normalizer
             if llm_strength and llm_strength != "Not_Applied":
-                llm_strength = normalize_strength("PVS1", llm_strength)
-                if llm_strength:
-                    criteria_p["PVS1"] = llm_strength
-                else:
-                    # Normalization failed, fall back to rule-based
-                    logger.warning(
-                        f"[agent2] Could not normalize LLM PVS1 strength. "
-                        f"Using rule-based: {rule_strength}"
-                    )
-                    if rule_strength:
-                        criteria_p["PVS1"] = rule_strength
+                criteria_p["PVS1"] = llm_strength
             caveats = llm_caveats
         else:
             logger.warning(f"[agent2] LLM failed for {variant_id} — using rule-based")
@@ -427,4 +415,3 @@ def agent2_consequence(state: VariantState) -> dict:
             }
         }
     }
-

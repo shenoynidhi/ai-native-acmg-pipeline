@@ -16,16 +16,13 @@ Environment variable precedence:
 
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # Load .env from project root — works on pod and locally.
 # In Docker, env vars are injected directly so .env is ignored.
 load_dotenv(Path(__file__).parent.parent / ".env")
-
-# Suppress ChromaDB telemetry errors (cosmetic stderr noise from version mismatch)
-os.environ["CHROMA_TELEMETRY"] = "0"
 
 # ---------------------------------------------------------------------------
 # Base directories — all overridable via environment variables
@@ -77,7 +74,7 @@ LLM_API_KEY:  str = os.getenv("LLM_API_KEY",  "dummy")
 
 class PipelineConfig(BaseModel):
     """All configurable parameters for a pipeline run.
-
+    
     Instantiate with defaults:   cfg = PipelineConfig()
     Override at runtime:         cfg = PipelineConfig(min_depth=15, genome_build="GRCh37")
     """
@@ -91,9 +88,6 @@ class PipelineConfig(BaseModel):
 
     # ---- Genome build -------------------------------------------------------
     genome_build: str = "GRCh38"   # or "GRCh37"
-
-    # ---- Case database for PS4 (optional) -----------------------------------
-    case_database_csv: Optional[Path] = None  # Path to user case database CSV
 
     # ---- Quality-filter thresholds (pre-filter node) ------------------------
     maf_threshold:      float = 0.01    # variants above this MAF are flagged
@@ -252,18 +246,6 @@ def get_database_paths(genome_build: str = "GRCh38") -> dict:
 
         # --- VEP plugins dir (build-agnostic) --------------------------------
         "vep_plugins_dir":          VEP_ROOT / "Plugins",
-
-        # --- Reference FASTA (required for VEP HGVSc generation) -------------
-        "reference_fasta": (
-            REFERENCE_DIR / "GRCh37.fa"
-            if b.upper() == "GRCH37"
-            else REFERENCE_DIR / "GRCh38.fa"
-        ),
-        "reference_fasta_fai": (
-            REFERENCE_DIR / "GRCh37.fa.fai"
-            if b.upper() == "GRCH37"
-            else REFERENCE_DIR / "GRCh38.fa.fai"
-        ),
     }
 
     return {**DATABASE_PATHS, **build_paths}

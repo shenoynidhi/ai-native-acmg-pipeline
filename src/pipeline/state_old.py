@@ -98,7 +98,6 @@ class VariantState(TypedDict):
     gnomad_mis_z:             Optional[float] # gnomAD missense Z-score
     gnomad_oe_mis:            Optional[float] # gnomAD observed/expected missense
     exon_number:       Optional[str] # e.g. "15/23"  (exon 15 of 23 total)
-    zygosity:          Optional[str] # "heterozygous" | "homozygous" | "hemizygous" (from VCF GT)
     intron_number:     Optional[str] # e.g. "14/22"
 
     # -------------------------------------------------------------------------

@@ -134,6 +134,7 @@ DETAIL_COLUMNS = [
     ("REVEL",                   "revel_score"),
     ("SpliceAI",                "max_spliceai"),
     ("CADD PHRED",              "cadd_phred"),
+    ("Zygosity",                "zygosity"),
     ("Phase Status",            "phase_status"),
     ("Zygosity Filter",         "zygosity_filter_status"),
     ("Matched Disease",         "matched_orphanet_disease"),
@@ -192,6 +193,7 @@ def _state_to_row(state: dict, rank: int) -> dict:
         "revel_score":                state.get("revel_score"),
         "max_spliceai":               state.get("max_spliceai"),
         "cadd_phred":                 state.get("cadd_phred"),
+        "zygosity":                   state.get("zygosity") or "",
         "phase_status":               state.get("phase_status") or "",
         "phase_confidence":           state.get("phase_confidence") or "",
         "zygosity_filter_status":     state.get("zygosity_filter_status") or "",
@@ -521,3 +523,4 @@ def generate_reports(
 
     logger.info(f"Reports complete: {list(outputs.keys())}")
     return outputs
+
