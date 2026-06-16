@@ -26,18 +26,19 @@ State fields read:
   trio_mode, parent1_genotype, parent2_genotype, denovo_status,
   gene, variant_id, consequence,
   gene_clingen_validity, gene_orphanet_inheritance,
-  clinvar_clnsig, clinvar_stars
+  clinvar_classification, clinvar_review_stars
 
 State fields written (via agent_evidence):
   agent_evidence["agent7"]
 """
 
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 from typing import Optional
 from src.pipeline.state import VariantState
 from src.utils.llm_client import call_llm_json
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('agent7_denovo')
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +202,7 @@ def _llm_refine(
     p1_gt        = state.get("parent1_genotype") or "N/A"
     p2_gt        = state.get("parent2_genotype") or "N/A"
     denovo       = state.get("denovo_status") or "unknown"
-    clinvar_sig  = state.get("clinvar_clnsig") or "unknown"
+    clinvar_sig  = state.get("clinvar_classification") or "unknown"
 
     user_prompt = f"""Evaluate de novo evidence for this variant:
 

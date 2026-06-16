@@ -43,6 +43,12 @@ from src.pipeline.graph import VARIANT_GRAPH
 from src.pipeline.state import build_initial_state, VariantState
 from src.pipeline.nodes.report_generator import generate_reports
 from src.config import OUTPUT_DIR, REPORT_CONFIG
+from src.utils.logging_config import (
+    configure_pipeline_logging,
+    log_session_header,
+    log_session_footer,
+    ProgressCallback
+)
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +220,7 @@ def run_session(
     proband_sex:       str            = "unknown",
     output_formats:    Optional[list] = None,
     case_database_csv: Optional[str]  = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> dict:
     """
     Run the full ACMG pipeline for a patient VCF.
@@ -229,6 +236,7 @@ def run_session(
         proband_sex:       "male" | "female" | "unknown".
         output_formats:    Subset of ["xlsx", "tsv", "html"]. Default: all three.
         case_database_csv: Optional path to user case database CSV for PS4 evaluation.
+        progress_callback: Optional callback for real-time progress updates (API layer).
 
     Returns:
         {
@@ -238,20 +246,26 @@ def run_session(
             "completed_states": [VariantState, ...]
         }
     """
+    # Configure logging (suppresses cosmetic warnings, preserves actionable info)
+    configure_pipeline_logging(level=logging.INFO, suppress_warnings=True)
+
     if output_formats is None:
         output_formats = ["xlsx", "tsv", "html"]
 
     work_dir = OUTPUT_DIR / session_id
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(
-        f"=== Session {session_id} started | "
-        f"build={genome_build} | "
-        f"formats={output_formats} | "
-        f"trio={'yes' if parent1_vcf_path and parent2_vcf_path else 'no'} ==="
-    )
+    # Log session header
+    log_session_header(session_id, genome_build)
+
+    # Emit progress: session started
+    if progress_callback:
+        progress_callback.update('initialization', 0.05, 'Session initialized', session_id=session_id)
 
     # ── Pass 1: VEP annotation + variant parsing ─────────────────────────────
+    if progress_callback:
+        progress_callback.update('vep_annotation', 0.10, 'Running VEP annotation')
+
     parsed_variants, annotated_tsv = _run_vep_pass(
         session_id        = session_id,
         proband_vcf_path  = proband_vcf_path,
@@ -267,8 +281,14 @@ def run_session(
         case_database_csv = case_database_csv,
     )
 
+    # Emit progress: VEP complete
+    if progress_callback:
+        progress_callback.update('vep_annotation', 0.25, f'VEP complete - {len(parsed_variants)} variants parsed', variant_count=len(parsed_variants))
+
     if not parsed_variants:
         logger.warning(f"[{session_id}] No variants to process — aborting.")
+        if progress_callback:
+            progress_callback.update('complete', 1.0, 'No variants found', status='complete')
         return {
             "session_id":       session_id,
             "variant_count":    0,
@@ -282,7 +302,22 @@ def run_session(
 
     for i, variant_state in enumerate(parsed_variants, start=1):
         variant_id = variant_state.get("variant_id", f"variant_{i}")
+        gene = variant_state.get("gene", "unknown")
         logger.info(f"[{session_id}] Variant {i}/{total}: {variant_id}")
+
+        # Emit progress: processing variant
+        if progress_callback:
+            # Progress: 25% (VEP) + 70% (variants) * current/total = 25-95%
+            progress = 0.25 + (0.70 * i / total)
+            progress_callback.update(
+                'evidence_collection',
+                progress,
+                f'Evaluating {gene} variant ({i}/{total})',
+                variant_id=variant_id,
+                variant_number=i,
+                total_variants=total,
+                gene=gene
+            )
 
         result = _run_variant_pass(
             variant_state     = variant_state,
@@ -307,6 +342,10 @@ def run_session(
         f"generating reports"
     )
 
+    # Emit progress: generating reports
+    if progress_callback:
+        progress_callback.update('report_generation', 0.95, 'Generating reports')
+
     # ── Reports: one call, full variant list ─────────────────────────────────
     # genome_build is session-specific (user-supplied), so override the static
     # REPORT_CONFIG branding on a shallow copy — never mutate the global.
@@ -321,11 +360,19 @@ def run_session(
         report_config = rc,
     )
 
-    logger.info(
-        f"=== Session {session_id} complete | "
-        f"{len(completed_states)} variants | "
-        f"reports: {list(report_paths.keys())} ==="
-    )
+    # Log session footer
+    log_session_footer(len(completed_states), report_paths)
+
+    # Emit progress: complete
+    if progress_callback:
+        progress_callback.update(
+            'complete',
+            1.0,
+            f'Classification complete - {len(completed_states)} variants',
+            status='complete',
+            variant_count=len(completed_states),
+            report_paths={k: str(v) for k, v in report_paths.items()}
+        )
 
     return {
         "session_id":       session_id,

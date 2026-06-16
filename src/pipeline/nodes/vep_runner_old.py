@@ -56,8 +56,8 @@ def _build_vep_command(
     cache_key   = "vep_cache_grch37" if build_upper == "GRCH37" else "vep_cache"
 
     # Reference FASTA (required for HGVSc/HGVSp generation)
-    fasta_key = "reference_fasta_grch37" if build_upper == "GRCH37" else "reference_fasta"
-    reference_fasta = db.get(fasta_key)
+    # get_database_paths() returns "reference_fasta" for both builds
+    reference_fasta = db.get("reference_fasta")
 
     loftee_gerp_flag = _LOFTEE_GERP_FLAG.get(assembly, "gerp_bigwig")
 
@@ -92,9 +92,9 @@ def _build_vep_command(
         #   vep_install -a cf -s homo_sapiens -y GRCh38 --REFSEQ --CACHEDIR /workspace/data/.vep
         #   vep_install -a cf -s homo_sapiens -y GRCh37 --REFSEQ --CACHEDIR /workspace/data/.vep
 
-        # dbNSFP plugin (consequence=ALL to include splice/frameshift variants)
+        # dbNSFP plugin - scores for missense, splice, frameshift variants
         "--plugin", (
-            f"dbNSFP,consequence=ALL,{db['dbnsfp']},"
+            f"dbNSFP,{db['dbnsfp']},"
             + ",".join(_DBNSFP_FIELDS)
         ),
 

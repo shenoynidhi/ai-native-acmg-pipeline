@@ -638,8 +638,8 @@
           </td>
           <td>{{ row.phenotype_score }}</td>
           <td style="font-family:var(--font-mono);font-size:11px">{{ row.max_gnomad_af }}</td>
-          <td>{{ row.clinvar_clnsig }}</td>
-          <td style="text-align:center">{{ row.clinvar_stars }}</td>
+          <td>{{ row.clinvar_classification }}</td>
+          <td style="text-align:center">{{ row.clinvar_review_stars }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -745,8 +745,8 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px">
           {% for label, key in [
             ('REVEL', 'revel_score'), ('SpliceAI', 'max_spliceai'),
-            ('CADD PHRED', 'cadd_phred'), ('Phase Status', 'phase_status'),
-            ('Phase Confidence', 'phase_confidence'),
+            ('CADD PHRED', 'cadd_phred'), ('Zygosity', 'zygosity'),
+            ('Phase Status', 'phase_status'), ('Phase Confidence', 'phase_confidence'),
             ('Zygosity Filter', 'zygosity_filter_status'),
           ] %}
           <div class="detail-field">

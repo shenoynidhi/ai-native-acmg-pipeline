@@ -124,8 +124,8 @@ PRIMARY_COLUMNS = [
     ("Classification Confidence", "confidence"),
     ("Phenotype Score",     "phenotype_score"),
     ("gnomAD AF",           "max_gnomad_af"),
-    ("ClinVar",             "clinvar_clnsig"),
-    ("ClinVar ★",          "clinvar_stars"),
+    ("ClinVar Classification", "clinvar_classification"),
+    ("ClinVar Review Stars",   "clinvar_review_stars"),
 ]
 
 # Detail columns shown in expandable rows (HTML) / extra sheet (xlsx)
@@ -134,6 +134,9 @@ DETAIL_COLUMNS = [
     ("REVEL",                   "revel_score"),
     ("SpliceAI",                "max_spliceai"),
     ("CADD PHRED",              "cadd_phred"),
+    ("LoF Status",              "lof_status"),
+    ("LoF Filter",              "lof_filter"),
+    ("LoF Flags",               "lof_flags"),
     ("Zygosity",                "zygosity"),
     ("Phase Status",            "phase_status"),
     ("Zygosity Filter",         "zygosity_filter_status"),
@@ -185,14 +188,17 @@ def _state_to_row(state: dict, rank: int) -> dict:
         "confidence":           state.get("confidence") or "LOW",
         "phenotype_score":      f"{phenotype_score:.3f}" if phenotype_score is not None else "—",
         "max_gnomad_af":        f"{gnomad_af:.6f}" if gnomad_af else "0.000000",
-        "clinvar_clnsig":       state.get("clinvar_clnsig") or "—",
-        "clinvar_stars":        state.get("clinvar_stars", 0),
+        "clinvar_classification": state.get("clinvar_classification") or "—",
+        "clinvar_review_stars":   state.get("clinvar_review_stars", 0),
 
         # --- detail ---
         "evidence_summary":           state.get("evidence_summary") or "",
         "revel_score":                state.get("revel_score"),
         "max_spliceai":               state.get("max_spliceai"),
         "cadd_phred":                 state.get("cadd_phred"),
+        "lof_status":                 state.get("lof_status") or "Not predicted LoF",
+        "lof_filter":                 state.get("lof_filter") or "—",
+        "lof_flags":                  state.get("lof_flags") or "—",
         "zygosity":                   state.get("zygosity") or "",
         "phase_status":               state.get("phase_status") or "",
         "phase_confidence":           state.get("phase_confidence") or "",

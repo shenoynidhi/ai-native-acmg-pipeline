@@ -98,6 +98,7 @@ class VariantState(TypedDict):
     gnomad_mis_z:             Optional[float] # gnomAD missense Z-score
     gnomad_oe_mis:            Optional[float] # gnomAD observed/expected missense
     exon_number:       Optional[str] # e.g. "15/23"  (exon 15 of 23 total)
+    zygosity:          Optional[str] # "heterozygous" | "homozygous" | "hemizygous" (from VCF GT)
     intron_number:     Optional[str] # e.g. "14/22"
 
     # -------------------------------------------------------------------------
@@ -111,10 +112,10 @@ class VariantState(TypedDict):
     # -------------------------------------------------------------------------
     # Phase 3 — ClinVar  (populated by post_process_node)
     # -------------------------------------------------------------------------
-    clinvar_clnsig:    Optional[str]  # e.g. "Pathogenic", "Likely_benign"
-    clinvar_stars:     int            # 0–4 review status stars
-    clinvar_disease:   Optional[str]  # disease name from CLNDN
-    clinvar_accession: Optional[str]  # e.g. "RCV000031349"
+    clinvar_classification: Optional[str]  # ClinVar classification (CLNSIG): "Pathogenic", "Likely_benign", etc.
+    clinvar_review_stars:   int            # ClinVar review status stars (CLNREVSTAT): 0–4 (0=no criteria, 1=single submitter, 2=multiple submitters, 3=expert panel, 4=practice guideline)
+    clinvar_disease:        Optional[str]  # ClinVar disease name (CLNDN)
+    clinvar_accession:      Optional[str]  # ClinVar accession (CLNACC): e.g. "RCV000031349"
 
     # -------------------------------------------------------------------------
     # Phase 4 — in-silico predictor scores  (populated by post_process_node)
@@ -307,10 +308,10 @@ def build_initial_state(
         gnomad_af_by_population  = {},
 
         # --- ClinVar ---
-        clinvar_clnsig    = None,
-        clinvar_stars     = 0,
-        clinvar_disease   = None,
-        clinvar_accession = None,
+        clinvar_classification = None,
+        clinvar_review_stars   = 0,
+        clinvar_disease        = None,
+        clinvar_accession      = None,
 
         # --- in-silico scores ---
         is_loftee_hc          = False,

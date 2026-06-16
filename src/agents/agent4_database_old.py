@@ -8,8 +8,9 @@ ACMG/AMP 2015 criteria assessed:
   PS1  — Same amino acid change as a previously established pathogenic variant
           (different nucleotide change). Pathogenic Strong.
   PS4  — Variant prevalence in affected individuals significantly increased vs controls.
-          Requires ClinVar ≥2-star P/LP with multiple independent observations.
-          We use this conservatively: PS4_Supporting when ClinVar has P/LP with stars.
+          Requires case-control frequency analysis (OR > 5.0, p < 0.05).
+          Uses user-provided case database + gnomAD controls.
+          If no case DB provided: NOT_EVALUATED (gnomAD alone insufficient).
   PP5  — Reputable source (ClinVar ≥2 star) reports variant as pathogenic.
           Pathogenic Supporting.
   BP6  — Reputable source (ClinVar ≥2 star) reports variant as benign/likely benign.
@@ -26,7 +27,7 @@ Note on PS1 vs PM5:
 
 State fields read:
   variant_id, gene, consequence, protein_position, hgvsp, hgvsc,
-  clinvar_clnsig, clinvar_stars, clinvar_disease, clinvar_accession,
+  clinvar_classification, clinvar_review_stars, clinvar_disease, clinvar_accession,
   max_gnomad_af, gnomad_af_popmax
 
 State fields written (via agent_evidence):
@@ -34,15 +35,23 @@ State fields written (via agent_evidence):
 """
 
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 import re
+from pathlib import Path
 from typing import Optional
 
 from src.pipeline.state import VariantState
 from src.rag.retriever import query_clinvar_by_variant, query_clinvar_same_codon
 from src.utils.llm_client import call_llm_json
 from src.pipeline.pubmed import pubmed_search, pubmed_format_for_llm
+from src.utils.case_control import load_case_database, evaluate_ps4
+from src.utils.criteria_normalizer import normalize_criteria_dict
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('agent4_database_old')
+
+# Global cache for case database (load once per session)
+_CASE_DB_CACHE = None
+_CASE_DB_PATH = None
 
 # ---------------------------------------------------------------------------
 # Significance classification helpers
@@ -176,23 +185,90 @@ def _evaluate_ps1_from_rag(
     return strength, notes
 
 
-def _evaluate_ps4_from_rag(rag_hits: list[dict], gene: str) -> tuple[Optional[str], list[str]]:
+def _evaluate_ps4_from_case_db(
+    state: VariantState,
+    variant_id: str,
+    gene: str,
+    case_db_path: Optional[Path],
+) -> tuple[Optional[str], list[str]]:
     """
-    PS4_Supporting: Multiple independent ClinVar P/LP reports for this variant or gene.
-    We use Supporting (not full PS4) because we can't verify true independence.
-    """
-    high_star_p_hits = [
-        h for h in rag_hits
-        if _is_pathogenic(h["metadata"].get("clnsig", "")) and
-           h["metadata"].get("stars", 0) >= 3
-    ]
+    PS4: Variant prevalence in affected individuals significantly increased vs controls.
 
-    if len(high_star_p_hits) >= 2:
-        return "Supporting", [
-            f"PS4_Supporting: {len(high_star_p_hits)} ≥3-star pathogenic ClinVar entries "
-            f"for {gene} variants in this region."
+    ACMG/AMP 2015 PS4 definition:
+        "Prevalence of the variant in affected individuals is significantly increased
+         compared with the prevalence in controls (OR > 5.0, p < 0.05)."
+
+    Requires:
+        - Case cohort with affected individuals + variant status
+        - Control frequencies from gnomAD
+        - Fisher's exact test for statistical significance
+
+    If case_db_path is None:
+        Returns NOT_EVALUATED with explanation (gnomAD alone is insufficient).
+
+    Returns:
+        (strength, notes) where strength = "Strong" | "Supporting" | None
+    """
+    global _CASE_DB_CACHE, _CASE_DB_PATH
+
+    # No case database provided
+    if not case_db_path or not Path(case_db_path).exists():
+        return None, [
+            "PS4: Not evaluated (requires case-control frequency data). "
+            "gnomAD provides control frequencies only; case cohort required. "
+            "To enable: provide case_database_csv in config with affected individuals."
         ]
-    return None, []
+
+    # Load case database (cached)
+    try:
+        if _CASE_DB_PATH != case_db_path:
+            logger.info(f"Loading case database: {case_db_path}")
+            _CASE_DB_CACHE = load_case_database(Path(case_db_path))
+            _CASE_DB_PATH = case_db_path
+
+        case_db = _CASE_DB_CACHE
+    except Exception as e:
+        logger.error(f"Failed to load case database: {e}")
+        return None, [f"PS4: Case database load failed ({e})"]
+
+    # Extract disease phenotype from state (if available)
+    condition = state.get("phenotype") or state.get("disease")
+
+    # Evaluate PS4 using case-control analysis
+    try:
+        result = evaluate_ps4(
+            case_db=case_db,
+            state=state,
+            variant_id=variant_id,
+            gene=gene,
+            condition=condition,
+        )
+    except Exception as e:
+        logger.error(f"PS4 evaluation failed: {e}")
+        return None, [f"PS4: Evaluation failed ({e})"]
+
+    # Map result to ACMG strength
+    if result["status"] == "met":
+        strength = result["strength"]  # "Strong" or "Supporting"
+        notes = [
+            f"PS4 ({strength}): {result['reason']} "
+            f"Cases: {result['cases_with_variant']}/{result['cases_total']} "
+            f"({result['case_frequency']:.4f}). "
+            f"Controls (gnomAD {result['population']}): "
+            f"{result['controls_with_variant']}/{result['controls_total']} "
+            f"({result['control_frequency']:.6f}). "
+            f"OR={result['OR']}, p={result['p_value']:.4e}."
+        ]
+        return strength, notes
+
+    elif result["status"] == "not_met":
+        return None, [
+            f"PS4: Not met. {result['reason']} "
+            f"(OR={result['OR']}, p={result['p_value']:.4e})"
+        ]
+
+    else:  # insufficient
+        return None, [f"PS4: Insufficient evidence. {result['reason']}"]
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +314,8 @@ def _llm_refine(
     gene       = state.get("gene", "UNKNOWN")
     hgvsc      = state.get("hgvsc") or "N/A"
     hgvsp      = state.get("hgvsp") or "N/A"
-    clnsig     = state.get("clinvar_clnsig") or "Not in ClinVar"
-    stars      = state.get("clinvar_stars", 0)
+    clnsig     = state.get("clinvar_classification") or "Not in ClinVar"
+    stars      = state.get("clinvar_review_stars", 0)
     accession  = state.get("clinvar_accession") or "N/A"
     disease    = state.get("clinvar_disease") or "N/A"
     consequence = state.get("consequence", "")
@@ -295,12 +371,18 @@ def agent4_database(state: VariantState) -> dict:
     """
     Agent 4: Evaluate prior classification / database criteria (PS1, PS4, PP5, BP6).
 
+    PS4 evaluation uses optional case database from state["case_database_csv"].
+    If not provided, PS4 returns NOT_EVALUATED (gnomAD alone is insufficient).
+
     Returns:
         dict with key "agent_evidence" -> {"agent4": AgentEvidence dict}
     """
     gene        = state.get("gene", "UNKNOWN")
     variant_id  = state.get("variant_id", "?")
     consequence = state.get("consequence", "") or ""
+    case_db_path_str = state.get("case_database_csv")
+    case_db_path = Path(case_db_path_str) if case_db_path_str else None
+
     logger.info(f"[agent4_database] Evaluating {variant_id} ({gene})")
 
     criteria_p: dict = {}
@@ -313,8 +395,8 @@ def agent4_database(state: VariantState) -> dict:
     ]
 
     # --- Step 1: Direct ClinVar annotation (exact variant, from VEP) ---
-    clnsig    = state.get("clinvar_clnsig")
-    stars     = state.get("clinvar_stars", 0) or 0
+    clnsig    = state.get("clinvar_classification")
+    stars     = state.get("clinvar_review_stars", 0) or 0
     accession = state.get("clinvar_accession")
 
     direct_p, direct_b, direct_notes = _evaluate_from_direct_clinvar(
@@ -364,13 +446,15 @@ def agent4_database(state: VariantState) -> dict:
             criteria_p["PS1"] = ps1_strength
             all_notes.extend(ps1_notes)
 
-    # --- Step 4: PS4_Supporting from RAG ---
-    if "PP5" not in criteria_p and rag_hits:
-        ps4_strength, ps4_notes = _evaluate_ps4_from_rag(rag_hits, gene)
+    # --- Step 4: PS4 from case-control analysis ---
+    if "PP5" not in criteria_p:
+        ps4_strength, ps4_notes = _evaluate_ps4_from_case_db(
+            state, variant_id, gene, case_db_path
+        )
         if ps4_strength and "PS1" not in criteria_p:
-            # Don't stack PS4 if PS1 already assigned
+            # Don't stack PS4 if PS1 already assigned (same evidence type)
             criteria_p["PS4"] = ps4_strength
-            all_notes.extend(ps4_notes)
+        all_notes.extend(ps4_notes)
 
     # --- Step 5: LLM refinement ---
     # Call LLM when: no ClinVar direct hit, conflicting signals, or RAG has high-star hits
@@ -389,8 +473,16 @@ def agent4_database(state: VariantState) -> dict:
         llm_result = _llm_refine(state, criteria_p, criteria_b, rag_hits, pubmed_hits, all_notes)
 
         if llm_result and not llm_result.get("error"):
-            criteria_p = llm_result.get("criteria_pathogenic", criteria_p)
-            criteria_b = llm_result.get("criteria_benign", criteria_b)
+            # Normalize LLM output using shared normalizer
+            llm_criteria_p = normalize_criteria_dict(
+                llm_result.get("criteria_pathogenic", {})
+            )
+            llm_criteria_b = normalize_criteria_dict(
+                llm_result.get("criteria_benign", {})
+            )
+
+            criteria_p = llm_criteria_p if llm_criteria_p else criteria_p
+            criteria_b = llm_criteria_b if llm_criteria_b else criteria_b
             confidence = llm_result.get("confidence", "MEDIUM")
             evidence_notes = llm_result.get("evidence_notes", " ".join(all_notes))
             citations += llm_result.get("citations", [])
@@ -446,3 +538,4 @@ def _parse_variant_id(variant_id: str) -> tuple[str, int, str, str]:
         return chrom, pos, ref, alt
     except Exception:
         return "chrUnknown", 0, "N", "N"
+

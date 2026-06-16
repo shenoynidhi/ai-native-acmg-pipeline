@@ -27,13 +27,13 @@ Note on PS3/BS3:
   database, we use:
     1. ClinVar functional evidence flags (CLNREVSTAT mentions "functional")
     2. LLM knowledge of well-characterised genes (BRCA1/2, TP53, etc.)
-    3. State clinvar_clnsig as a proxy signal
+    3. State clinvar_classification as a proxy signal
   We are conservative: assign PS3_Supporting only, never full PS3 Strong,
   unless LLM has high confidence based on well-known functional data.
 
 State fields read:
   gene, consequence, protein_position, hgvsp, hgvsc,
-  clinvar_clnsig, clinvar_stars, clinvar_disease,
+  clinvar_classification, clinvar_review_stars, clinvar_disease,
   gene_clingen_validity, gene_orphanet_inheritance,
   gene_gnomad_pli, gene_gnomad_loeuf, gene_gnomad_zscore,
   gene_clinvar_missense_fraction,
@@ -45,6 +45,7 @@ State fields written (via agent_evidence):
 """
 
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 from typing import Optional
 
 from src.pipeline.state import VariantState
@@ -52,7 +53,7 @@ from src.rag.retriever import query_uniprot_domains
 from src.utils.llm_client import call_llm_json
 from src.pipeline.pubmed import pubmed_search, pubmed_format_for_llm
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('agent5_functional')
 
 # ---------------------------------------------------------------------------
 # Domain constraint thresholds for PM1
@@ -225,8 +226,8 @@ def _ps3_bs3_signals(
     LLM makes the final call.
     """
     gene       = state.get("gene", "") or ""
-    clnsig     = state.get("clinvar_clnsig") or ""
-    stars      = state.get("clinvar_stars", 0) or 0
+    clnsig     = state.get("clinvar_classification") or ""
+    stars      = state.get("clinvar_review_stars", 0) or 0
     clingen    = state.get("gene_clingen_validity") or ""
     notes      = []
 
@@ -319,8 +320,8 @@ def _llm_refine(
     zscore      = state.get("gene_gnomad_zscore")
     clingen     = state.get("gene_clingen_validity") or "Unknown"
     inheritance = state.get("gene_orphanet_inheritance") or "Unknown"
-    clnsig      = state.get("clinvar_clnsig") or "Not in ClinVar"
-    stars       = state.get("clinvar_stars", 0)
+    clnsig      = state.get("clinvar_classification") or "Not in ClinVar"
+    stars       = state.get("clinvar_review_stars", 0)
     miss_frac   = state.get("gene_clinvar_missense_fraction")
 
     # Summarise domain hits

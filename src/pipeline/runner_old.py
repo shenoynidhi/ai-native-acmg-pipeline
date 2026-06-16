@@ -63,6 +63,7 @@ def _run_vep_pass(
     parent1_bam_path:  Optional[str],
     parent2_bam_path:  Optional[str],
     proband_sex:       str,
+    case_database_csv: Optional[str],
 ) -> tuple[list[VariantState], str]:
     """
     Invoke the graph once to run VEP annotation on the full VCF.
@@ -84,6 +85,7 @@ def _run_vep_pass(
         parent1_bam_path  = parent1_bam_path,
         parent2_bam_path  = parent2_bam_path,
         proband_sex       = proband_sex,
+        case_database_csv = case_database_csv,
     )
 
     logger.info(f"[{session_id}] Pass 1 — running VEP on full VCF")
@@ -124,6 +126,7 @@ def _run_variant_pass(
     parent1_bam_path:  Optional[str],
     parent2_bam_path:  Optional[str],
     proband_sex:       str,
+    case_database_csv: Optional[str],
 ) -> VariantState:
     """
     Run the full graph for one already-annotated variant.
@@ -148,6 +151,7 @@ def _run_variant_pass(
         parent1_bam_path  = parent1_bam_path,
         parent2_bam_path  = parent2_bam_path,
         proband_sex       = proband_sex,
+        case_database_csv = case_database_csv,
     )
 
     # Overlay all variant-specific fields from post_process_node output
@@ -156,7 +160,7 @@ def _run_variant_pass(
         "session_id", "proband_vcf_path", "genome_build",
         "parent1_vcf_path", "parent2_vcf_path", "trio_mode",
         "proband_sex", "clinical_notes", "patient_hpo_terms",
-        "warnings",
+        "warnings", "case_database_csv",
     }
     for key, value in variant_state.items():
         if key not in _session_keys:
@@ -209,6 +213,7 @@ def run_session(
     parent2_bam_path:  Optional[str]       = None,
     proband_sex:       str            = "unknown",
     output_formats:    Optional[list] = None,
+    case_database_csv: Optional[str]  = None,
 ) -> dict:
     """
     Run the full ACMG pipeline for a patient VCF.
@@ -223,6 +228,7 @@ def run_session(
         parent2_vcf_path:  Paternal VCF for trio mode (optional).
         proband_sex:       "male" | "female" | "unknown".
         output_formats:    Subset of ["xlsx", "tsv", "html"]. Default: all three.
+        case_database_csv: Optional path to user case database CSV for PS4 evaluation.
 
     Returns:
         {
@@ -258,6 +264,7 @@ def run_session(
         parent1_bam_path = parent1_bam_path,
         parent2_bam_path = parent2_bam_path,
         proband_sex       = proband_sex,
+        case_database_csv = case_database_csv,
     )
 
     if not parsed_variants:
@@ -291,6 +298,7 @@ def run_session(
             proband_bam_path = proband_bam_path,
             parent1_bam_path = parent1_bam_path,
             parent2_bam_path = parent2_bam_path,
+            case_database_csv = case_database_csv,
         )
         completed_states.append(result)
 
@@ -325,4 +333,5 @@ def run_session(
         "report_paths":     report_paths,
         "completed_states": completed_states,
     }
+
 

@@ -27,7 +27,7 @@ Note on PS1 vs PM5:
 
 State fields read:
   variant_id, gene, consequence, protein_position, hgvsp, hgvsc,
-  clinvar_clnsig, clinvar_stars, clinvar_disease, clinvar_accession,
+  clinvar_classification, clinvar_review_stars, clinvar_disease, clinvar_accession,
   max_gnomad_af, gnomad_af_popmax
 
 State fields written (via agent_evidence):
@@ -35,6 +35,7 @@ State fields written (via agent_evidence):
 """
 
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 import re
 from pathlib import Path
 from typing import Optional
@@ -42,11 +43,12 @@ from typing import Optional
 from src.pipeline.state import VariantState
 from src.rag.retriever import query_clinvar_by_variant, query_clinvar_same_codon
 from src.utils.llm_client import call_llm_json
+from src.utils.disease_matcher import diseases_match, get_disease_match_confidence
 from src.pipeline.pubmed import pubmed_search, pubmed_format_for_llm
 from src.utils.case_control import load_case_database, evaluate_ps4
 from src.utils.criteria_normalizer import normalize_criteria_dict
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('agent4_database')
 
 # Global cache for case database (load once per session)
 _CASE_DB_CACHE = None
@@ -147,10 +149,15 @@ def _evaluate_ps1_from_rag(
     protein_pos: Optional[int],
     consequence: str,
     rag_hits: list[dict],
+    matched_orphanet_disease: Optional[str],
 ) -> tuple[Optional[str], list[str]]:
     """
     PS1: Same amino acid change as a known P/LP variant (different nucleotide).
     Only applies to missense variants.
+
+    Cross-validates ClinVar disease with patient's Orphanet-matched disease
+    to prevent false PS1 when variant is pathogenic for a different disease.
+
     Returns (strength, notes).
     """
     MISSENSE_CONSEQUENCES = {
@@ -173,13 +180,57 @@ def _evaluate_ps1_from_rag(
 
     best = max(same_aa_hits, key=lambda h: h["metadata"].get("stars", 0))
     stars = best["metadata"].get("stars", 0)
-    strength = "Strong" if stars >= 3 else "Moderate"
+    clinvar_disease = best["metadata"].get("clndn", "")
 
-    notes.append(
-        f"PS1 ({strength}): Same amino acid change as ClinVar P/LP variant "
-        f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
-        f"{stars} stars). HGVSp={hgvsp}."
-    )
+    # Base strength from ClinVar stars
+    base_strength = "Strong" if stars >= 3 else "Moderate"
+
+    # Disease matching cross-validation
+    if clinvar_disease and matched_orphanet_disease:
+        match, similarity, match_note = get_disease_match_confidence(
+            clinvar_disease, matched_orphanet_disease
+        )
+
+        if match:
+            # SAME variant + SAME disease → High confidence PS1
+            strength = base_strength
+            notes.append(
+                f"PS1 ({strength}): Same amino acid change as ClinVar P/LP variant "
+                f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
+                f"{stars} stars). HGVSp={hgvsp}. "
+                f"ClinVar disease '{clinvar_disease}' matches patient disease "
+                f"'{matched_orphanet_disease}' (similarity={similarity:.2f}). "
+                f"High confidence - disease context validated."
+            )
+        else:
+            # SAME variant + DIFFERENT disease → Downgrade strength, flag caution
+            strength = "Moderate" if base_strength == "Strong" else "Supporting"
+            notes.append(
+                f"PS1 ({strength}, with caution): Same amino acid change as ClinVar P/LP variant "
+                f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
+                f"{stars} stars). HGVSp={hgvsp}. "
+                f"⚠️ Disease mismatch: ClinVar reports pathogenic for '{clinvar_disease}' "
+                f"but patient has '{matched_orphanet_disease}' (similarity={similarity:.2f}). "
+                f"PS1 downgraded - verify phenotype relevance."
+            )
+    elif clinvar_disease:
+        # ClinVar has disease but patient disease unknown
+        strength = base_strength
+        notes.append(
+            f"PS1 ({strength}): Same amino acid change as ClinVar P/LP variant "
+            f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
+            f"{stars} stars) for '{clinvar_disease}'. HGVSp={hgvsp}. "
+            f"Patient disease not provided - unable to cross-validate disease context."
+        )
+    else:
+        # Neither disease available
+        strength = base_strength
+        notes.append(
+            f"PS1 ({strength}): Same amino acid change as ClinVar P/LP variant "
+            f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
+            f"{stars} stars). HGVSp={hgvsp}. "
+            f"Disease context unavailable - classification based on variant identity only."
+        )
 
     return strength, notes
 
@@ -313,8 +364,8 @@ def _llm_refine(
     gene       = state.get("gene", "UNKNOWN")
     hgvsc      = state.get("hgvsc") or "N/A"
     hgvsp      = state.get("hgvsp") or "N/A"
-    clnsig     = state.get("clinvar_clnsig") or "Not in ClinVar"
-    stars      = state.get("clinvar_stars", 0)
+    clnsig     = state.get("clinvar_classification") or "Not in ClinVar"
+    stars      = state.get("clinvar_review_stars", 0)
     accession  = state.get("clinvar_accession") or "N/A"
     disease    = state.get("clinvar_disease") or "N/A"
     consequence = state.get("consequence", "")
@@ -394,8 +445,8 @@ def agent4_database(state: VariantState) -> dict:
     ]
 
     # --- Step 1: Direct ClinVar annotation (exact variant, from VEP) ---
-    clnsig    = state.get("clinvar_clnsig")
-    stars     = state.get("clinvar_stars", 0) or 0
+    clnsig    = state.get("clinvar_classification")
+    stars     = state.get("clinvar_review_stars", 0) or 0
     accession = state.get("clinvar_accession")
 
     direct_p, direct_b, direct_notes = _evaluate_from_direct_clinvar(
@@ -437,9 +488,10 @@ def agent4_database(state: VariantState) -> dict:
         all_notes.append(f"PubMed search failed: {e}")
 
     # --- Step 3: PS1 from RAG (only if PP5 not already assigned for same variant) ---
+    matched_orphanet_disease = state.get("matched_orphanet_disease")
     if "PP5" not in criteria_p and rag_hits:
         ps1_strength, ps1_notes = _evaluate_ps1_from_rag(
-            gene, hgvsp, protein_pos, consequence, rag_hits
+            gene, hgvsp, protein_pos, consequence, rag_hits, matched_orphanet_disease
         )
         if ps1_strength:
             criteria_p["PS1"] = ps1_strength

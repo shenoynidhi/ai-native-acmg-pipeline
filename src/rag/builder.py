@@ -133,6 +133,7 @@ def build_clinvar_collection():
         batch_metas.append({
             "gene":   gene,
             "clnsig": clnsig,
+            "clndn":  clndn,  # Disease name for PS1/PM5 disease matching
             "stars":  stars,
             "chrom":  variant.CHROM,
             "pos":    int(variant.POS),
@@ -232,6 +233,7 @@ def build_clinvar_gene_collection():
         meta = {
             "gene":   gene,
             "clnsig": clnsig,
+            "clndn":  clndn,  # Disease name for PM5 disease matching
             "chrom":  variant.CHROM,
             "pos":    int(variant.POS),
             "ref":    variant.REF,

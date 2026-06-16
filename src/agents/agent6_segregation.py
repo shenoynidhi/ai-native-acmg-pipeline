@@ -33,7 +33,7 @@ Solo mode limitations (always flagged):
 State fields read:
   gene, variant_id, consequence,
   phase_status, phase_confidence, phase_partner,
-  clinvar_clnsig, clinvar_stars,
+  clinvar_classification, clinvar_review_stars,
   gene_clingen_validity, gene_orphanet_inheritance,
   trio_mode, parent1_genotype, parent2_genotype, denovo_status
 
@@ -42,12 +42,13 @@ State fields written (via agent_evidence):
 """
 
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 from typing import Optional
 
 from src.pipeline.state import VariantState
 from src.utils.llm_client import call_llm_json
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('agent6_segregation')
 
 # ---------------------------------------------------------------------------
 # Phase status constants (set by phasing_node using WhatsHap)

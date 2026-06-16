@@ -368,14 +368,59 @@ def _load_clingen() -> Dict[str, str]:
 # Value parsers — all return None on missing/invalid input
 # ===========================================================================
 
-def _float(value: str) -> Optional[float]:
-    """Parse a VEP field to float. Returns None for '.', '', 'nan'."""
+def _float(value: str, transcript_id: str = None, transcript_list: str = None) -> Optional[float]:
+    """
+    Parse a VEP field to float. Returns None for '.', '', 'nan'.
+
+    For multi-transcript dbNSFP values:
+    - If transcript_id and transcript_list provided, match by transcript position
+    - Otherwise, return first valid numeric value (fallback for non-transcript-specific fields)
+
+    Args:
+        value: The score value(s) from dbNSFP (may be comma-separated)
+        transcript_id: Current row's Ensembl transcript ID (e.g., "ENST00000544455")
+        transcript_list: Comma-separated list of transcript IDs from dbNSFP Ensembl_transcriptid field
+    """
     if not value or value in (".", "-", "nan", "NA", "N/A"):
         return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
+
+    # Single value case
+    if "," not in value:
+        try:
+            return float(value)
+        except ValueError:
+            return None
+
+    # Multi-value case: comma-separated scores for multiple transcripts
+    parts = [p.strip() for p in value.split(",")]
+
+    # Try transcript-specific matching if both IDs provided
+    if transcript_id and transcript_list and "," in transcript_list:
+        transcript_ids = [t.strip() for t in transcript_list.split(",")]
+        # Match by full ID or by base ID without version (ENST00000544455.1 -> ENST00000544455)
+        transcript_base = transcript_id.split(".")[0]
+
+        for i, tid in enumerate(transcript_ids):
+            tid_base = tid.split(".")[0]
+            if tid == transcript_id or tid_base == transcript_base:
+                if i < len(parts):
+                    part = parts[i]
+                    if part and part not in (".", "-", "nan", "NA", "N/A"):
+                        try:
+                            return float(part)
+                        except ValueError:
+                            pass
+                break
+
+    # Fallback: return first valid numeric value
+    for part in parts:
+        if part and part not in (".", "-", "nan", "NA", "N/A"):
+            try:
+                return float(part)
+            except ValueError:
+                continue
+
+    return None
 
 
 def _int(value: str) -> Optional[int]:
@@ -420,6 +465,48 @@ def _parse_clinvar_stars(clnrevstat: str) -> int:
     return _CLNREVSTAT_STARS.get(key, 0)
 
 
+def _format_lof_status(lof_tag: Optional[str], lof_filter: Optional[str], lof_flags: Optional[str]) -> str:
+    """
+    Format human-readable LoF status for reports.
+
+    Args:
+        lof_tag: "HC" (high confidence) or "LC" (low confidence) or empty
+        lof_filter: Reason for not being HC (e.g., "SINGLE_EXON", "END_TRUNC")
+        lof_flags: Additional warnings (e.g., "PHYLOCSF_WEAK")
+
+    Returns:
+        Human-readable string for reports
+    """
+    if not lof_tag or lof_tag == "-":
+        return "Not predicted LoF"
+
+    if lof_tag == "HC":
+        if lof_flags:
+            # High confidence but with caveats
+            flag_text = lof_flags.replace("_", " ").lower()
+            return f"High confidence LoF (warning: {flag_text})"
+        return "High confidence LoF"
+
+    if lof_tag == "LC":
+        if lof_filter:
+            # Low confidence with reason
+            filter_map = {
+                "SINGLE_EXON": "single exon gene",
+                "END_TRUNC": "truncation in last exon",
+                "SMALL_INTRON": "small intron (<15bp)",
+                "NON_CAN_SPLICE": "non-canonical splice site",
+                "NON_CAN_SPLICE_SURR": "non-canonical surrounding splice sites",
+                "EXON_INTRON_UNDEF": "exon/intron boundary undefined",
+                "ANC_ALLELE": "ancestral allele discordance",
+            }
+            readable = filter_map.get(lof_filter, lof_filter.replace("_", " ").lower())
+            return f"Low confidence LoF ({readable})"
+        return "Low confidence LoF"
+
+    # Fallback
+    return f"LoF: {lof_tag}"
+
+
 def _max_gnomad_af(row: Dict, pop_cols: Dict) -> Tuple[float, Dict[str, float]]:
     """
     Extract max gnomAD AF and per-population AF dict from a VEP row.
@@ -452,14 +539,18 @@ def _insilico_votes(row: Dict, cfg_revel_path: float = 0.75,
     """
     dam, ben = 0, 0
 
-    revel = _float(row.get("REVEL_score", ".") or ".")
+    # Get transcript ID for matching multi-transcript scores
+    transcript_id = row.get("Feature", "")
+    transcript_list = row.get("Ensembl_transcriptid", "")
+
+    revel = _float(row.get("REVEL_score", ".") or ".", transcript_id, transcript_list)
     if revel is not None:
         if revel >= cfg_revel_path:
             dam += 1
         elif revel <= cfg_revel_ben:
             ben += 1
 
-    cadd = _float(row.get("CADD_phred", ".") or ".")
+    cadd = _float(row.get("CADD_phred", ".") or ".", transcript_id, transcript_list)
     if cadd is not None:
         if cadd >= cfg_cadd:
             dam += 1
@@ -469,7 +560,7 @@ def _insilico_votes(row: Dict, cfg_revel_path: float = 0.75,
     # PolyPhen: D/P = damaging, B = benign
     pp2 = _str(row.get("Polyphen2_HDIV_score", ".") or ".")
     # VEP --everything gives numeric score, not category
-    pp2_score = _float(row.get("Polyphen2_HDIV_score", ".") or ".")
+    pp2_score = _float(row.get("Polyphen2_HDIV_score", ".") or ".", transcript_id, transcript_list)
     if pp2_score is not None:
         if pp2_score >= 0.909:
             dam += 1
@@ -477,7 +568,7 @@ def _insilico_votes(row: Dict, cfg_revel_path: float = 0.75,
             ben += 1
 
     # SIFT: lower = more damaging (<0.05 = deleterious)
-    sift = _float(row.get("SIFT_score", ".") or ".")
+    sift = _float(row.get("SIFT_score", ".") or ".", transcript_id, transcript_list)
     if sift is not None:
         if sift < 0.05:
             dam += 1
@@ -555,19 +646,27 @@ def _parse_vep_row(
     clinvar_disease = _str(row.get("ClinVar_CLNDN", "") or "")
     clinvar_acc = _str(row.get("ClinVar_CLNACC", "") or "")
 
-    # In-silico scores
+    # In-silico scores (with transcript matching for multi-transcript dbNSFP values)
+    transcript_id = row.get("Feature", "")
+    transcript_list = row.get("Ensembl_transcriptid", "")
+
     spliceai    = _parse_spliceai(row.get("SpliceAI_pred", "") or "")
-    revel       = _float(row.get("REVEL_score", "") or "")
-    cadd        = _float(row.get("CADD_phred", "") or "")
-    sift        = _float(row.get("SIFT_score", "") or "")
-    pp2         = _float(row.get("Polyphen2_HDIV_score", "") or "")
-    phylop      = _float(row.get("phyloP100way_vertebrate", "") or "")
-    gerp        = _float(row.get("GERP++_RS", "") or "")
-    metasvm     = _float(row.get("MetaSVM_score", "") or "")
+    revel       = _float(row.get("REVEL_score", "") or "", transcript_id, transcript_list)
+    cadd        = _float(row.get("CADD_phred", "") or "", transcript_id, transcript_list)
+    sift        = _float(row.get("SIFT_score", "") or "", transcript_id, transcript_list)
+    pp2         = _float(row.get("Polyphen2_HDIV_score", "") or "", transcript_id, transcript_list)
+    phylop      = _float(row.get("phyloP100way_vertebrate", "") or "", transcript_id, transcript_list)
+    gerp        = _float(row.get("GERP++_RS", "") or "", transcript_id, transcript_list)
+    metasvm     = _float(row.get("MetaSVM_score", "") or "", transcript_id, transcript_list)
 
     # LOFTEE
     lof_tag     = _str(row.get("LoF", "") or "")
+    lof_filter  = _str(row.get("LoF_filter", "") or "")
+    lof_flags   = _str(row.get("LoF_flags", "") or "")
     is_loftee_hc = lof_tag == "HC"
+
+    # Format human-readable LoF status
+    lof_status = _format_lof_status(lof_tag, lof_filter, lof_flags)
 
     # In-silico votes
     dam_votes, ben_votes = _insilico_votes(row)
@@ -637,13 +736,16 @@ def _parse_vep_row(
         "gnomad_af_by_population": af_by_pop,
 
         # Phase 3 — ClinVar
-        "clinvar_clnsig":    clinvar_sig,
-        "clinvar_stars":     clinvar_stars,
-        "clinvar_disease":   clinvar_disease,
-        "clinvar_accession": clinvar_acc,
+        "clinvar_classification": clinvar_sig,
+        "clinvar_review_stars":   clinvar_stars,
+        "clinvar_disease":        clinvar_disease,
+        "clinvar_accession":      clinvar_acc,
 
         # Phase 4 — in-silico scores
         "is_loftee_hc":           is_loftee_hc,
+        "lof_filter":             lof_filter,
+        "lof_flags":              lof_flags,
+        "lof_status":             lof_status,
         "max_spliceai":           spliceai,
         "revel_score":            revel,
         "cadd_phred":             cadd,

@@ -20,12 +20,13 @@ State fields written (via agent_evidence):
 """
 
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 from typing import Optional
 
 from src.pipeline.state import VariantState
 from src.utils.llm_client import call_llm_json
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('agent1_population')
 
 # ---------------------------------------------------------------------------
 # Thresholds (per ACMG/AMP 2015 + ClinGen SVI 2018 refinements)

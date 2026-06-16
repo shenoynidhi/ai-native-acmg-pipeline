@@ -38,6 +38,7 @@ State fields WRITTEN:
 
 import json
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 from typing import Optional
 
 import chromadb
@@ -47,7 +48,7 @@ from src.pipeline.state import VariantState
 from src.utils.llm_client import call_llm_json
 from src.config import CHROMADB_DIR
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('pathogenic_advocate')
 
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 

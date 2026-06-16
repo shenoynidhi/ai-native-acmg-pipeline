@@ -86,6 +86,82 @@ _CLNREVSTAT_STARS = {
 
 
 # ---------------------------------------------------------------------------
+# Genomic HGVS generation (fallback when HGVSc is blank)
+# ---------------------------------------------------------------------------
+
+def _generate_genomic_hgvs(chrom: str, pos: int, ref: str, alt: str, genome_build: str = "GRCh38") -> str:
+    """
+    Generate genomic HGVS notation (NC_ accession) for variants missing HGVSc.
+
+    Args:
+        chrom: Chromosome (e.g., "7" or "chr7")
+        pos: Position (1-based)
+        ref: Reference allele
+        alt: Alternate allele
+        genome_build: "GRCh38" or "GRCh37"
+
+    Returns:
+        Genomic HGVS string like "NC_000007.14:g.117548628A>G"
+    """
+    # RefSeq chromosome accessions (GRCh38/hg38)
+    CHROM_ACCESSIONS_38 = {
+        "1": "NC_000001.11", "2": "NC_000002.12", "3": "NC_000003.12",
+        "4": "NC_000004.12", "5": "NC_000005.10", "6": "NC_000006.12",
+        "7": "NC_000007.14", "8": "NC_000008.11", "9": "NC_000009.12",
+        "10": "NC_000010.11", "11": "NC_000011.10", "12": "NC_000012.12",
+        "13": "NC_000013.11", "14": "NC_000014.9", "15": "NC_000015.10",
+        "16": "NC_000016.10", "17": "NC_000017.11", "18": "NC_000018.10",
+        "19": "NC_000019.10", "20": "NC_000020.11", "21": "NC_000021.9",
+        "22": "NC_000022.11", "X": "NC_000023.11", "Y": "NC_000024.10",
+        "MT": "NC_012920.1", "M": "NC_012920.1"
+    }
+
+    # RefSeq chromosome accessions (GRCh37/hg19)
+    CHROM_ACCESSIONS_37 = {
+        "1": "NC_000001.10", "2": "NC_000002.11", "3": "NC_000003.11",
+        "4": "NC_000004.11", "5": "NC_000005.9", "6": "NC_000006.11",
+        "7": "NC_000007.13", "8": "NC_000008.10", "9": "NC_000009.11",
+        "10": "NC_000010.10", "11": "NC_000011.9", "12": "NC_000012.11",
+        "13": "NC_000013.10", "14": "NC_000014.8", "15": "NC_000015.9",
+        "16": "NC_000016.9", "17": "NC_000017.10", "18": "NC_000018.9",
+        "19": "NC_000019.9", "20": "NC_000020.10", "21": "NC_000021.8",
+        "22": "NC_000022.10", "X": "NC_000023.10", "Y": "NC_000024.9",
+        "MT": "NC_012920.1", "M": "NC_012920.1"
+    }
+
+    accessions = CHROM_ACCESSIONS_37 if genome_build.upper() == "GRCH37" else CHROM_ACCESSIONS_38
+    chrom_clean = chrom.replace("chr", "").upper()
+    accession = accessions.get(chrom_clean, f"chr{chrom_clean}")
+
+    # Determine HGVS type based on variant
+    if len(ref) == 1 and len(alt) == 1:
+        # SNV: g.117548628A>G
+        return f"{accession}:g.{pos}{ref}>{alt}"
+    elif len(ref) > len(alt):
+        # Deletion
+        if len(alt) == 1:  # Simple deletion
+            del_start = pos + 1
+            del_end = pos + len(ref) - 1
+            if del_start == del_end:
+                return f"{accession}:g.{del_start}del"
+            else:
+                return f"{accession}:g.{del_start}_{del_end}del"
+        else:
+            # Delins
+            return f"{accession}:g.{pos}_{pos + len(ref) - 1}delins{alt}"
+    elif len(alt) > len(ref):
+        # Insertion
+        if len(ref) == 1:  # Simple insertion
+            return f"{accession}:g.{pos}_{pos + 1}ins{alt[1:]}"
+        else:
+            # Delins
+            return f"{accession}:g.{pos}_{pos + len(ref) - 1}delins{alt}"
+    else:
+        # Same length delins
+        return f"{accession}:g.{pos}_{pos + len(ref) - 1}delins{alt}"
+
+
+# ---------------------------------------------------------------------------
 # Zygosity extraction from VCF GT field
 # ---------------------------------------------------------------------------
 
@@ -292,14 +368,59 @@ def _load_clingen() -> Dict[str, str]:
 # Value parsers — all return None on missing/invalid input
 # ===========================================================================
 
-def _float(value: str) -> Optional[float]:
-    """Parse a VEP field to float. Returns None for '.', '', 'nan'."""
+def _float(value: str, transcript_id: str = None, transcript_list: str = None) -> Optional[float]:
+    """
+    Parse a VEP field to float. Returns None for '.', '', 'nan'.
+
+    For multi-transcript dbNSFP values:
+    - If transcript_id and transcript_list provided, match by transcript position
+    - Otherwise, return first valid numeric value (fallback for non-transcript-specific fields)
+
+    Args:
+        value: The score value(s) from dbNSFP (may be comma-separated)
+        transcript_id: Current row's Ensembl transcript ID (e.g., "ENST00000544455")
+        transcript_list: Comma-separated list of transcript IDs from dbNSFP Ensembl_transcriptid field
+    """
     if not value or value in (".", "-", "nan", "NA", "N/A"):
         return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
+
+    # Single value case
+    if "," not in value:
+        try:
+            return float(value)
+        except ValueError:
+            return None
+
+    # Multi-value case: comma-separated scores for multiple transcripts
+    parts = [p.strip() for p in value.split(",")]
+
+    # Try transcript-specific matching if both IDs provided
+    if transcript_id and transcript_list and "," in transcript_list:
+        transcript_ids = [t.strip() for t in transcript_list.split(",")]
+        # Match by full ID or by base ID without version (ENST00000544455.1 -> ENST00000544455)
+        transcript_base = transcript_id.split(".")[0]
+
+        for i, tid in enumerate(transcript_ids):
+            tid_base = tid.split(".")[0]
+            if tid == transcript_id or tid_base == transcript_base:
+                if i < len(parts):
+                    part = parts[i]
+                    if part and part not in (".", "-", "nan", "NA", "N/A"):
+                        try:
+                            return float(part)
+                        except ValueError:
+                            pass
+                break
+
+    # Fallback: return first valid numeric value
+    for part in parts:
+        if part and part not in (".", "-", "nan", "NA", "N/A"):
+            try:
+                return float(part)
+            except ValueError:
+                continue
+
+    return None
 
 
 def _int(value: str) -> Optional[int]:
@@ -376,14 +497,18 @@ def _insilico_votes(row: Dict, cfg_revel_path: float = 0.75,
     """
     dam, ben = 0, 0
 
-    revel = _float(row.get("REVEL_score", ".") or ".")
+    # Get transcript ID for matching multi-transcript scores
+    transcript_id = row.get("Feature", "")
+    transcript_list = row.get("Ensembl_transcriptid", "")
+
+    revel = _float(row.get("REVEL_score", ".") or ".", transcript_id, transcript_list)
     if revel is not None:
         if revel >= cfg_revel_path:
             dam += 1
         elif revel <= cfg_revel_ben:
             ben += 1
 
-    cadd = _float(row.get("CADD_phred", ".") or ".")
+    cadd = _float(row.get("CADD_phred", ".") or ".", transcript_id, transcript_list)
     if cadd is not None:
         if cadd >= cfg_cadd:
             dam += 1
@@ -393,7 +518,7 @@ def _insilico_votes(row: Dict, cfg_revel_path: float = 0.75,
     # PolyPhen: D/P = damaging, B = benign
     pp2 = _str(row.get("Polyphen2_HDIV_score", ".") or ".")
     # VEP --everything gives numeric score, not category
-    pp2_score = _float(row.get("Polyphen2_HDIV_score", ".") or ".")
+    pp2_score = _float(row.get("Polyphen2_HDIV_score", ".") or ".", transcript_id, transcript_list)
     if pp2_score is not None:
         if pp2_score >= 0.909:
             dam += 1
@@ -401,7 +526,7 @@ def _insilico_votes(row: Dict, cfg_revel_path: float = 0.75,
             ben += 1
 
     # SIFT: lower = more damaging (<0.05 = deleterious)
-    sift = _float(row.get("SIFT_score", ".") or ".")
+    sift = _float(row.get("SIFT_score", ".") or ".", transcript_id, transcript_list)
     if sift is not None:
         if sift < 0.05:
             dam += 1
@@ -479,15 +604,18 @@ def _parse_vep_row(
     clinvar_disease = _str(row.get("ClinVar_CLNDN", "") or "")
     clinvar_acc = _str(row.get("ClinVar_CLNACC", "") or "")
 
-    # In-silico scores
+    # In-silico scores (with transcript matching for multi-transcript dbNSFP values)
+    transcript_id = row.get("Feature", "")
+    transcript_list = row.get("Ensembl_transcriptid", "")
+
     spliceai    = _parse_spliceai(row.get("SpliceAI_pred", "") or "")
-    revel       = _float(row.get("REVEL_score", "") or "")
-    cadd        = _float(row.get("CADD_phred", "") or "")
-    sift        = _float(row.get("SIFT_score", "") or "")
-    pp2         = _float(row.get("Polyphen2_HDIV_score", "") or "")
-    phylop      = _float(row.get("phyloP100way_vertebrate", "") or "")
-    gerp        = _float(row.get("GERP++_RS", "") or "")
-    metasvm     = _float(row.get("MetaSVM_score", "") or "")
+    revel       = _float(row.get("REVEL_score", "") or "", transcript_id, transcript_list)
+    cadd        = _float(row.get("CADD_phred", "") or "", transcript_id, transcript_list)
+    sift        = _float(row.get("SIFT_score", "") or "", transcript_id, transcript_list)
+    pp2         = _float(row.get("Polyphen2_HDIV_score", "") or "", transcript_id, transcript_list)
+    phylop      = _float(row.get("phyloP100way_vertebrate", "") or "", transcript_id, transcript_list)
+    gerp        = _float(row.get("GERP++_RS", "") or "", transcript_id, transcript_list)
+    metasvm     = _float(row.get("MetaSVM_score", "") or "", transcript_id, transcript_list)
 
     # LOFTEE
     lof_tag     = _str(row.get("LoF", "") or "")
@@ -514,6 +642,10 @@ def _parse_vep_row(
     # HGVSc / HGVSp
     hgvsc = _str(row.get("HGVSc", "") or "")
     hgvsp = _str(row.get("HGVSp", "") or "")
+
+    # Fallback: generate genomic HGVS when HGVSc is blank (e.g., for intronic variants)
+    if not hgvsc and chrom and pos_int and ref and alt:
+        hgvsc = _generate_genomic_hgvs(chrom, pos_int, ref, alt, base_state.get("genome_build", "GRCh38"))
 
     # Gene-level context from reference databases
     constraint = gnomad_constraint.get(gene, {})
@@ -557,10 +689,10 @@ def _parse_vep_row(
         "gnomad_af_by_population": af_by_pop,
 
         # Phase 3 — ClinVar
-        "clinvar_clnsig":    clinvar_sig,
-        "clinvar_stars":     clinvar_stars,
-        "clinvar_disease":   clinvar_disease,
-        "clinvar_accession": clinvar_acc,
+        "clinvar_classification": clinvar_sig,
+        "clinvar_review_stars":   clinvar_stars,
+        "clinvar_disease":        clinvar_disease,
+        "clinvar_accession":      clinvar_acc,
 
         # Phase 4 — in-silico scores
         "is_loftee_hc":           is_loftee_hc,
@@ -690,11 +822,39 @@ def post_process_node(state: VariantState) -> dict:
                     "downstream_gene_variant",
                     "intergenic_variant",
                     "intron_variant",
-                    "synonymous_variant",  # unless config.include_synonymous=True
                 }
+
                 if consequence in EXCLUDED_CONSEQUENCES:
                     logger.debug(f"[{session_id}] Filtered out {vid}: {consequence}")
                     continue
+
+                # Special handling for synonymous variants: only keep if likely to affect splicing
+                # Keep if SpliceAI ≥ 0.2 OR within 3bp of exon boundary
+                if consequence == "synonymous_variant":
+                    spliceai = variant_state.get("max_spliceai", 0.0) or 0.0
+                    keep_variant = False
+
+                    # Criterion 1: SpliceAI ≥ 0.2 (likely splice-altering)
+                    if spliceai >= 0.2:
+                        logger.debug(f"[{session_id}] Retained synonymous {vid}: SpliceAI={spliceai:.3f}")
+                        keep_variant = True
+                    else:
+                        # Criterion 2: Check if near exon-intron boundary
+                        # VEP DISTANCE field indicates distance to nearest feature
+                        # For synonymous variants AT exon boundaries, DISTANCE is usually 0 or near 0
+                        distance = row.get("DISTANCE", "")
+                        if distance and distance != "-":
+                            try:
+                                dist_val = int(distance)
+                                if dist_val <= 3:  # Within 3bp of boundary
+                                    logger.debug(f"[{session_id}] Retained synonymous {vid}: DISTANCE={dist_val}bp from boundary")
+                                    keep_variant = True
+                            except ValueError:
+                                pass
+
+                    if not keep_variant:
+                        logger.debug(f"[{session_id}] Filtered synonymous {vid}: SpliceAI={spliceai:.3f} < 0.2, not at boundary")
+                        continue
 
                 seen_variant_ids.add(vid)
                 parsed_variants.append(variant_state)

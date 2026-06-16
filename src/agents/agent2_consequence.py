@@ -20,7 +20,7 @@ The 5-caveat decision tree:
 State fields read:
   consequence, is_loftee_hc, gene, gene_clingen_validity, gene_orphanet_inheritance,
   gene_gnomad_pli, gene_gnomad_loeuf, exon_number, intron_number,
-  hgvsc, hgvsp, transcript, clinvar_clnsig, clinvar_stars,
+  hgvsc, hgvsp, transcript, clinvar_classification, clinvar_review_stars,
   gene_clinvar_lof_fraction
 
 State fields written (via agent_evidence):
@@ -28,6 +28,7 @@ State fields written (via agent_evidence):
 """
 
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 import re
 from typing import Optional
 
@@ -35,7 +36,7 @@ from src.pipeline.state import VariantState
 from src.utils.llm_client import call_llm_json
 from src.utils.criteria_normalizer import normalize_strength
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('agent2_consequence')
 
 # ---------------------------------------------------------------------------
 # Consequence classes that can trigger PVS1
@@ -250,8 +251,8 @@ def _llm_refine_pvs1(state: VariantState, rule_strength: Optional[str], caveats:
     inheritance = state.get("gene_orphanet_inheritance") or "Unknown"
     loftee_hc   = state.get("is_loftee_hc", False)
     lof_frac    = state.get("gene_clinvar_lof_fraction")
-    clnsig      = state.get("clinvar_clnsig") or "Not in ClinVar"
-    clnstars    = state.get("clinvar_stars", 0)
+    clnsig      = state.get("clinvar_classification") or "Not in ClinVar"
+    clnstars    = state.get("clinvar_review_stars", 0)
 
     user_prompt = f"""Evaluate PVS1 for this variant using the ClinGen PVS1 decision tree:
 

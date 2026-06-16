@@ -112,16 +112,19 @@ class VariantState(TypedDict):
     # -------------------------------------------------------------------------
     # Phase 3 — ClinVar  (populated by post_process_node)
     # -------------------------------------------------------------------------
-    clinvar_clnsig:    Optional[str]  # e.g. "Pathogenic", "Likely_benign"
-    clinvar_stars:     int            # 0–4 review status stars
-    clinvar_disease:   Optional[str]  # disease name from CLNDN
-    clinvar_accession: Optional[str]  # e.g. "RCV000031349"
+    clinvar_classification: Optional[str]  # ClinVar classification (CLNSIG): "Pathogenic", "Likely_benign", etc.
+    clinvar_review_stars:   int            # ClinVar review status stars (CLNREVSTAT): 0–4 (0=no criteria, 1=single submitter, 2=multiple submitters, 3=expert panel, 4=practice guideline)
+    clinvar_disease:        Optional[str]  # ClinVar disease name (CLNDN)
+    clinvar_accession:      Optional[str]  # ClinVar accession (CLNACC): e.g. "RCV000031349"
 
     # -------------------------------------------------------------------------
     # Phase 4 — in-silico predictor scores  (populated by post_process_node)
     # All sourced from VEP + dbNSFP plugin output; None = score not available
     # -------------------------------------------------------------------------
-    is_loftee_hc:           bool            # LOFTEE high-confidence LoF
+    is_loftee_hc:           bool            # LOFTEE high-confidence LoF (True if LoF="HC")
+    lof_filter:             Optional[str]   # LOFTEE filter reason if not HC (e.g., "SINGLE_EXON", "END_TRUNC")
+    lof_flags:              Optional[str]   # LOFTEE warning flags (e.g., "PHYLOCSF_WEAK")
+    lof_status:             str             # Human-readable LoF status for reports
     max_spliceai:           float           # max of DS_AG, DS_AL, DS_DG, DS_DL
     revel_score:            Optional[float] # 0–1, higher = more pathogenic
     cadd_phred:             Optional[float] # from dbNSFP column CADD_phred
@@ -308,13 +311,16 @@ def build_initial_state(
         gnomad_af_by_population  = {},
 
         # --- ClinVar ---
-        clinvar_clnsig    = None,
-        clinvar_stars     = 0,
-        clinvar_disease   = None,
-        clinvar_accession = None,
+        clinvar_classification = None,
+        clinvar_review_stars   = 0,
+        clinvar_disease        = None,
+        clinvar_accession      = None,
 
         # --- in-silico scores ---
         is_loftee_hc          = False,
+        lof_filter            = None,
+        lof_flags             = None,
+        lof_status            = "Not predicted LoF",
         max_spliceai          = 0.0,
         revel_score           = None,
         cadd_phred            = None,

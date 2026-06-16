@@ -5,7 +5,6 @@ Shared ChromaDB client helper with version compatibility handling.
 Addresses ChromaDB 1.5.x bugs with RustBindingsAPI and multi-tenancy.
 """
 
-import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,9 +30,6 @@ def get_chromadb_client(persist_dir):
     """
     import chromadb
     from pathlib import Path
-
-    # Suppress telemetry errors
-    os.environ["CHROMA_TELEMETRY"] = "0"
 
     persist_dir = Path(persist_dir)
     persist_dir.mkdir(parents=True, exist_ok=True)

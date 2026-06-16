@@ -606,49 +606,16 @@ def hpo_matcher_node(state: VariantState) -> dict:
 
     # ---- 4. Alternate molecular diagnosis -----------------------------------
     # Top HPO-matched gene that is NOT the current variant's gene.
-    # Only flag as alternate diagnosis if it scores SIGNIFICANTLY better than
-    # the variant's gene (avoids false BP5 triggers on overlapping phenotypes).
-    #
-    # BP5 threshold: alternate gene must score ≥0.20 Jaccard points higher than
-    # the variant gene to be considered a true alternate molecular basis.
-    BP5_THRESHOLD = 0.20
-
+    # Useful for the report: "consider also checking GENE_X".
     alternate_molecular_diagnosis: Optional[str] = None
-
-    # Get the variant gene's best score
-    variant_gene_score = scored[0][0] if scored else 0.0
-
-    # Score ALL HPO-matched genes and find the best alternate
-    gene_scores: List[Tuple[float, str, str, str]] = []  # (score, gene, disease, inheritance)
     for g in hpo_matched_genes:
-        if g == gene:
-            continue  # Skip the variant's own gene
-        alt_scored = _score_gene_diseases(g, present_hpo_ids)
-        if alt_scored:
-            best_alt_score, alt_orpha_id, alt_disease, alt_inheritance = alt_scored[0]
-            gene_scores.append((best_alt_score, g, alt_disease, alt_inheritance))
-
-    # Sort by score descending
-    gene_scores.sort(key=lambda x: x[0], reverse=True)
-
-    # Check if top alternate gene exceeds threshold
-    if gene_scores:
-        best_alt_score, best_alt_gene, best_alt_disease, _ = gene_scores[0]
-        score_difference = best_alt_score - variant_gene_score
-
-        if score_difference >= BP5_THRESHOLD:
-            alternate_molecular_diagnosis = f"{best_alt_gene} ({best_alt_disease})"
-            logger.info(
-                f"hpo_matcher_node: BP5 candidate detected — "
-                f"{best_alt_gene} score {best_alt_score:.3f} >> "
-                f"{gene} score {variant_gene_score:.3f} (Δ={score_difference:.3f} ≥ threshold {BP5_THRESHOLD})"
-            )
-        else:
-            logger.info(
-                f"hpo_matcher_node: No BP5 alternate — "
-                f"top alternate {best_alt_gene} score {best_alt_score:.3f} vs "
-                f"{gene} score {variant_gene_score:.3f} (Δ={score_difference:.3f} < threshold {BP5_THRESHOLD})"
-            )
+        if g != gene:
+            # Score this gene's diseases too so we report a meaningful candidate
+            alt_scored = _score_gene_diseases(g, present_hpo_ids)
+            if alt_scored:
+                _, _, alt_disease, _ = alt_scored[0]
+                alternate_molecular_diagnosis = f"{g} ({alt_disease})"
+                break
 
     # ---- 5. Gene inheritance -----------------------------------------------
     gene_inheritance = _get_gene_inheritance(gene, orphanet_id)
@@ -670,4 +637,3 @@ def hpo_matcher_node(state: VariantState) -> dict:
         "alternate_molecular_diagnosis": alternate_molecular_diagnosis,
         "gene_orphanet_inheritance":     gene_inheritance,
     }
-

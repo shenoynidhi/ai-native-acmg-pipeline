@@ -49,9 +49,8 @@ from typing import Optional
 from src.pipeline.state import VariantState
 from src.rag.retriever import query_clinvar_same_codon, query_clinvar_for_gene
 from src.utils.llm_client import call_llm_json
-from src.utils.disease_matcher import diseases_match, get_disease_match_confidence
 
-logger = get_user_friendly_logger('agent8_gene_context')
+logger = get_user_friendly_logger('agent8_gene_context_old')
 
 # ---------------------------------------------------------------------------
 # Consequence groups
@@ -186,15 +185,10 @@ def _evaluate_pm5(
     variant_id: str,
     protein_position: Optional[str],
     amino_acid_change: Optional[str],
-    matched_orphanet_disease: Optional[str],
 ) -> tuple[Optional[str], list[str], list[str]]:
     """
     Query clinvar_gene_variants RAG collection for pathogenic missense variants
     at the same protein position but different amino acid change.
-
-    Cross-validates ClinVar disease with patient's Orphanet-matched disease
-    to prevent false PM5 when variant is pathogenic for a different disease.
-
     Returns (strength, notes, citations).
     """
     notes    = []
@@ -251,54 +245,21 @@ def _evaluate_pm5(
         )
         return None, notes, citations
 
-    # PM5 fires — check disease context if available
-    best_hit = hits[0] if hits else {}
-    clinvar_disease = best_hit.get("clndn", "")
-    base_strength = "Moderate"  # PM5 default strength
-
+    # PM5 fires — retriever already ensures different variant (same codon ±2)
     hit_descriptions = "; ".join(
         f"pos={h.get('protein_pos','?')} {h.get('alt','?')} ({h.get('clnsig','?')})"
         for h in hits[:3]
     )
-
-    # Disease matching cross-validation
-    if clinvar_disease and matched_orphanet_disease:
-        match, similarity, match_note = get_disease_match_confidence(
-            clinvar_disease, matched_orphanet_disease
-        )
-
-        if match:
-            # SAME codon + SAME disease → Standard PM5
-            notes.append(
-                f"PM5 ({base_strength}): Novel missense at {gene} p.{protein_position}. "
-                f"Known pathogenic variant(s) at same codon: {hit_descriptions}. "
-                f"ClinVar disease '{clinvar_disease}' matches patient disease "
-                f"'{matched_orphanet_disease}' (similarity={similarity:.2f}). "
-                f"Disease context validated."
-            )
-        else:
-            # SAME codon + DIFFERENT disease → PM5 with caution, downgraded
-            base_strength = "Supporting"
-            notes.append(
-                f"PM5 ({base_strength}, with caution): Novel missense at {gene} p.{protein_position}. "
-                f"Known pathogenic variant(s) at same codon: {hit_descriptions}. "
-                f"⚠️ Disease mismatch: ClinVar reports pathogenic for '{clinvar_disease}' "
-                f"but patient has '{matched_orphanet_disease}' (similarity={similarity:.2f}). "
-                f"PM5 downgraded - verify phenotype relevance."
-            )
-    else:
-        # Disease context unavailable - standard PM5
-        notes.append(
-            f"PM5 ({base_strength}): Novel missense at {gene} p.{protein_position}. "
-            f"Known pathogenic variant(s) at same codon: {hit_descriptions}. "
-            f"Different nucleotide change at same position supports pathogenicity."
-        )
-
+    notes.append(
+        f"PM5 (Moderate): Novel missense at {gene} p.{protein_position}. "
+        f"Known pathogenic variant(s) at same codon: {hit_descriptions}. "
+        f"Different nucleotide change at same position supports pathogenicity."
+    )
     citations = [
         f"ClinVar: {h.get('gene','?')}:{h.get('chrom','?')}:{h.get('pos','?')}:{h.get('alt','?')}"
         for h in hits[:3]
-    ]
-    return base_strength, notes, citations
+    ]    
+    return "Moderate", notes, citations
 
 # ---------------------------------------------------------------------------
 # LLM refinement
@@ -425,9 +386,8 @@ def agent8_gene_context(state: VariantState) -> dict:
     all_notes.extend(constraint_notes)
 
     # --- PM5 (RAG) ---
-    matched_orphanet_disease = state.get("matched_orphanet_disease")
     pm5_strength, pm5_notes, pm5_citations = _evaluate_pm5(
-        consequence, gene, variant_id, protein_position, amino_acid_change, matched_orphanet_disease
+        consequence, gene, variant_id, protein_position, amino_acid_change
     )
     if pm5_strength:
         criteria_p["PM5"] = pm5_strength
@@ -478,4 +438,3 @@ def agent8_gene_context(state: VariantState) -> dict:
             }
         }
     }
-
