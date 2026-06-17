@@ -383,7 +383,7 @@ def agent4_database(state: VariantState) -> dict:
     case_db_path_str = state.get("case_database_csv")
     case_db_path = Path(case_db_path_str) if case_db_path_str else None
 
-    logger.info(f"[agent4_database] Evaluating {variant_id} ({gene})")
+    logger.info(f"Evaluating {variant_id} ({gene})")
 
     criteria_p: dict = {}
     criteria_b: dict = {}
@@ -417,9 +417,9 @@ def agent4_database(state: VariantState) -> dict:
             chrom=chrom, pos=pos, ref=ref, alt=alt,
             gene=gene, n_results=15,
         )
-        logger.debug(f"[agent4] RAG returned {len(rag_hits)} ClinVar hits for {variant_id}")
+        logger.debug(f"RAG returned {len(rag_hits)} ClinVar hits for {variant_id}")
     except Exception as e:
-        logger.warning(f"[agent4] RAG query failed: {e}")
+        logger.warning(f"RAG query failed: {e}")
         all_notes.append(f"ClinVar RAG query failed: {e}")
 
 # --- Step 2b: PubMed search — variant classification literature ---
@@ -432,9 +432,9 @@ def agent4_database(state: VariantState) -> dict:
             query_type="variant",
             max_results=10,
         )
-        logger.debug(f"[agent4] PubMed returned {len(pubmed_hits)} papers for {variant_id}")
+        logger.debug(f"PubMed returned {len(pubmed_hits)} papers for {variant_id}")
     except Exception as e:
-        logger.warning(f"[agent4] PubMed search failed: {e}")
+        logger.warning(f"PubMed search failed: {e}")
         all_notes.append(f"PubMed search failed: {e}")
 
     # --- Step 3: PS1 from RAG (only if PP5 not already assigned for same variant) ---
@@ -469,7 +469,7 @@ def agent4_database(state: VariantState) -> dict:
     )
 
     if needs_llm:
-        logger.debug(f"[agent4] Calling LLM for {variant_id}")
+        logger.debug(f"Calling LLM for {variant_id}")
         llm_result = _llm_refine(state, criteria_p, criteria_b, rag_hits, pubmed_hits, all_notes)
 
         if llm_result and not llm_result.get("error"):
@@ -489,7 +489,7 @@ def agent4_database(state: VariantState) -> dict:
             if llm_result.get("conflicting_evidence"):
                 all_notes.append("CONFLICT: Both pathogenic and benign ClinVar evidence present.")
         else:
-            logger.warning(f"[agent4] LLM failed — using rule-based results")
+            logger.warning(f"LLM failed — using rule-based results")
             confidence = "MEDIUM"
             evidence_notes = " ".join(all_notes) or (
                 f"No ClinVar evidence found for {gene} {variant_id}. "

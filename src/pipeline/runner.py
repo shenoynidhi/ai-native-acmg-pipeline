@@ -258,13 +258,16 @@ def run_session(
     # Log session header
     log_session_header(session_id, genome_build)
 
+    # Create detailed progress emitter
+    from src.pipeline.progress_emitter import DetailedProgressEmitter
+    progress = DetailedProgressEmitter(progress_callback, total_variants=1)  # Will update after VEP
+
     # Emit progress: session started
     if progress_callback:
         progress_callback.update('initialization', 0.05, 'Session initialized', session_id=session_id)
 
     # ── Pass 1: VEP annotation + variant parsing ─────────────────────────────
-    if progress_callback:
-        progress_callback.update('vep_annotation', 0.10, 'Running VEP annotation')
+    progress.vep_starting()
 
     parsed_variants, annotated_tsv = _run_vep_pass(
         session_id        = session_id,
@@ -281,9 +284,9 @@ def run_session(
         case_database_csv = case_database_csv,
     )
 
-    # Emit progress: VEP complete
-    if progress_callback:
-        progress_callback.update('vep_annotation', 0.25, f'VEP complete - {len(parsed_variants)} variants parsed', variant_count=len(parsed_variants))
+    # Update progress emitter with actual variant count
+    progress.total_variants = len(parsed_variants)
+    progress.vep_complete(len(parsed_variants))
 
     if not parsed_variants:
         logger.warning(f"[{session_id}] No variants to process — aborting.")
@@ -305,19 +308,8 @@ def run_session(
         gene = variant_state.get("gene", "unknown")
         logger.info(f"[{session_id}] Variant {i}/{total}: {variant_id}")
 
-        # Emit progress: processing variant
-        if progress_callback:
-            # Progress: 25% (VEP) + 70% (variants) * current/total = 25-95%
-            progress = 0.25 + (0.70 * i / total)
-            progress_callback.update(
-                'evidence_collection',
-                progress,
-                f'Evaluating {gene} variant ({i}/{total})',
-                variant_id=variant_id,
-                variant_number=i,
-                total_variants=total,
-                gene=gene
-            )
+        # Emit progress: starting variant
+        progress.variant_starting(variant_id, gene, i)
 
         result = _run_variant_pass(
             variant_state     = variant_state,
@@ -337,14 +329,17 @@ def run_session(
         )
         completed_states.append(result)
 
+        # Emit progress: variant complete
+        classification = result.get("final_classification", "VUS")
+        progress.variant_complete(variant_id, gene, classification)
+
     logger.info(
         f"[{session_id}] All {len(completed_states)} variants processed — "
         f"generating reports"
     )
 
     # Emit progress: generating reports
-    if progress_callback:
-        progress_callback.update('report_generation', 0.95, 'Generating reports')
+    progress.generating_reports()
 
     # ── Reports: one call, full variant list ─────────────────────────────────
     # genome_build is session-specific (user-supplied), so override the static
@@ -364,6 +359,7 @@ def run_session(
     log_session_footer(len(completed_states), report_paths)
 
     # Emit progress: complete
+    progress.complete(len(completed_states))
     if progress_callback:
         progress_callback.update(
             'complete',

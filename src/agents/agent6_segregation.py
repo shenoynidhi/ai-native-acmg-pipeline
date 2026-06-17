@@ -472,7 +472,7 @@ def agent6_segregation(state: VariantState) -> dict:
     )
 
     if needs_llm:
-        logger.debug(f"[agent6] Calling LLM for {variant_id}")
+        logger.debug(f" Calling LLM for {variant_id}")
         llm_result = _llm_refine(state, criteria_p, criteria_b, all_notes)
 
         if llm_result and not llm_result.get("error"):
@@ -483,7 +483,7 @@ def agent6_segregation(state: VariantState) -> dict:
             citations     += llm_result.get("citations", [])
             limitations   += llm_result.get("limitations", [])
         else:
-            logger.warning(f"[agent6] LLM failed — rule-based only")
+            logger.warning(f" LLM failed — rule-based only")
             confidence = "LOW" if not trio_mode else "MEDIUM"
             evidence_notes = " ".join(all_notes)
     else:

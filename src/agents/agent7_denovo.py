@@ -272,7 +272,7 @@ def agent7_denovo(state: VariantState) -> dict:
     needs_llm = trio_mode and (criteria_p or criteria_b)
 
     if needs_llm:
-        logger.debug(f"[agent7] Calling LLM for {variant_id}")
+        logger.debug(f" Calling LLM for {variant_id}")
         llm_result = _llm_refine(state, criteria_p, criteria_b, notes, limitations)
 
         if llm_result and not llm_result.get("error"):
@@ -283,7 +283,7 @@ def agent7_denovo(state: VariantState) -> dict:
             citations     += llm_result.get("citations", [])
             limitations   += llm_result.get("limitations", [])
         else:
-            logger.warning(f"[agent7] LLM failed — rule-based only")
+            logger.warning(f" LLM failed — rule-based only")
             confidence     = "MEDIUM"
             evidence_notes = " ".join(notes)
     else:

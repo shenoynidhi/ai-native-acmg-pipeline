@@ -316,10 +316,10 @@ def evidence_aggregator_node(state: VariantState) -> dict:
     variant_id     = state.get("variant_id", "?")
     agent_evidence = state.get("agent_evidence", {})
 
-    logger.info(f"[evidence_aggregator] Aggregating evidence for {variant_id}")
+    logger.info(f" Aggregating evidence for {variant_id}")
 
     if not agent_evidence:
-        logger.warning(f"[evidence_aggregator] No agent evidence found for {variant_id}")
+        logger.warning(f" No agent evidence found for {variant_id}")
         # Check if clinical notes provided to determine unevaluated criteria
         clinical_notes = state.get("clinical_notes") or state.get("clinical_history") or ""
         unevaluated = ["PP4", "BP5"] if not clinical_notes.strip() else []

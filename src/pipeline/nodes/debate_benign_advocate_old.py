@@ -89,7 +89,7 @@ def _query_acmg_guidelines_benign(fired_criteria_b: list[str], gene: str, conseq
         return docs
 
     except Exception as e:
-        logger.warning(f"[benign_advocate] RAG query failed: {e}")
+        logger.warning(f"RAG query failed: {e}")
         return []
 
 
@@ -107,7 +107,7 @@ def _query_clinvar_benign(hgvs_p: Optional[str], hgvs_c: Optional[str], gene: st
         results = col.query(query_texts=[query], n_results=3)
         return results["documents"][0] if results["documents"] else []
     except Exception as e:
-        logger.warning(f"[benign_advocate] ClinVar RAG query failed: {e}")
+        logger.warning(f"ClinVar RAG query failed: {e}")
         return []
 
 
@@ -240,7 +240,7 @@ def debate_benign_advocate_node(state: VariantState) -> dict:
     to argue for the most benign defensible interpretation.
     """
     variant_id = state.get("variant_id", "?")
-    logger.info(f"[benign_advocate] Processing {variant_id}")
+    logger.info(f"Processing {variant_id}")
 
     fired_b     = list(state.get("all_criteria_benign", {}).keys())
     gene        = state.get("gene", "")

@@ -303,7 +303,7 @@ def agent2_consequence(state: VariantState) -> dict:
     gene       = state.get("gene", "UNKNOWN")
     variant_id = state.get("variant_id", "?")
     consequence = state.get("consequence", "") or ""
-    logger.info(f"[agent2_consequence] Evaluating {variant_id} ({gene}) — {consequence}")
+    logger.info(f" Evaluating {variant_id} ({gene}) — {consequence}")
 
     criteria_p: dict = {}
     criteria_b: dict = {}
@@ -358,7 +358,7 @@ def agent2_consequence(state: VariantState) -> dict:
     )
 
     if needs_llm:
-        logger.debug(f"[agent2] Calling LLM for PVS1 on {variant_id}")
+        logger.debug(f" Calling LLM for PVS1 on {variant_id}")
         llm_result = _llm_refine_pvs1(state, rule_strength, caveats)
 
         if llm_result and not llm_result.get("error"):
@@ -383,7 +383,7 @@ def agent2_consequence(state: VariantState) -> dict:
                         criteria_p["PVS1"] = rule_strength
             caveats = llm_caveats
         else:
-            logger.warning(f"[agent2] LLM failed for {variant_id} — using rule-based")
+            logger.warning(f" LLM failed for {variant_id} — using rule-based")
             if rule_strength:
                 criteria_p["PVS1"] = rule_strength
             confidence = "LOW"

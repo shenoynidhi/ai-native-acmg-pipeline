@@ -111,7 +111,7 @@ def _query_acmg_guidelines_pathogenic(fired_criteria: list[str], gene: str, cons
         return docs
 
     except Exception as e:
-        logger.warning(f"[pathogenic_advocate] RAG query failed: {e}")
+        logger.warning(f" RAG query failed: {e}")
         return []
 
 
@@ -132,7 +132,7 @@ def _query_clinvar_for_variant(hgvs_p: Optional[str], hgvs_c: Optional[str], gen
         results = col.query(query_texts=[query], n_results=3)
         return results["documents"][0] if results["documents"] else []
     except Exception as e:
-        logger.warning(f"[pathogenic_advocate] ClinVar RAG query failed: {e}")
+        logger.warning(f" ClinVar RAG query failed: {e}")
         return []
 
 
@@ -246,7 +246,7 @@ def debate_pathogenic_advocate_node(state: VariantState) -> dict:
     Queries RAG for guideline context, then calls LLM to argue for pathogenicity.
     """
     variant_id = state.get("variant_id", "?")
-    logger.info(f"[pathogenic_advocate] Processing {variant_id}")
+    logger.info(f" Processing {variant_id}")
 
     # Extract fired pathogenic criteria for targeted RAG query
     fired_p = list(state.get("all_criteria_pathogenic", {}).keys())

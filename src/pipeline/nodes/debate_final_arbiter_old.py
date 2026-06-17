@@ -106,7 +106,7 @@ def _query_acmg_guidelines_arbiter(
         return docs
 
     except Exception as e:
-        logger.warning(f"[final_arbiter] RAG query failed: {e}")
+        logger.warning(f"RAG query failed: {e}")
         return []
 
 
@@ -270,7 +270,7 @@ def debate_final_arbiter_node(state: VariantState) -> dict:
     ACMG classification with full evidence summary.
     """
     variant_id = state.get("variant_id", "?")
-    logger.info(f"[final_arbiter] Processing {variant_id}")
+    logger.info(f"Processing {variant_id}")
 
     # Collect ALL active criteria for broadest RAG query
     fired_p  = list(state.get("all_criteria_pathogenic", {}).keys())

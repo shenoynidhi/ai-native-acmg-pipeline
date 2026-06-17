@@ -722,7 +722,15 @@
           <span class="df-label">Unevaluated Criteria</span>
           <span class="df-value">
             <span class="unevaluated-tag">⚠ {{ row.unevaluated_str }}</span>
+            {% if row.clinical_notes %}
+              {% if row.phenotype_score and row.phenotype_score|float > 0 %}
+            — clinical history provided but variant gene does not match patient phenotype (score {{ row.phenotype_score }}, threshold 0.50).
+              {% else %}
+            — clinical history provided but this gene has no known phenotype association with the reported symptoms.
+              {% endif %}
+            {% else %}
             — classification may change if clinical phenotype data is provided.
+            {% endif %}
           </span>
         </div>
         {% endif %}

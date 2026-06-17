@@ -217,7 +217,7 @@ def _evaluate_pm5(
             n_results=5,
         )
     except Exception as exc:
-        logger.warning(f"[agent8] PM5 RAG query failed: {exc}")
+        logger.warning(f"PM5 RAG query failed: {exc}")
         notes.append(f"PM5 RAG query failed: {exc}. PM5 not evaluated.")
         return None, notes, citations
 
@@ -349,7 +349,7 @@ def agent8_gene_context(state: VariantState) -> dict:
     gene        = state.get("gene", "UNKNOWN")
     variant_id  = state.get("variant_id", "?")
     consequence = state.get("consequence", "") or ""
-    logger.info(f"[agent8_gene_context] Evaluating {variant_id} ({gene}), csq={consequence}")
+    logger.info(f"Evaluating {variant_id} ({gene}), csq={consequence}")
 
     repeat_region    = state.get("repeat_region", False) or False
     clingen_mech     = state.get("gene_clingen_mechanism")
@@ -402,7 +402,7 @@ def agent8_gene_context(state: VariantState) -> dict:
     )
 
     if needs_llm:
-        logger.debug(f"[agent8] Calling LLM for {variant_id}")
+        logger.debug(f"Calling LLM for {variant_id}")
         llm_result = _llm_refine(state, criteria_p, criteria_b, all_notes, all_citations)
         if llm_result and not llm_result.get("error"):
             criteria_p     = llm_result.get("criteria_pathogenic", criteria_p)
@@ -411,7 +411,7 @@ def agent8_gene_context(state: VariantState) -> dict:
             evidence_notes = llm_result.get("evidence_notes", " ".join(all_notes))
             all_citations += llm_result.get("citations", [])
         else:
-            logger.warning(f"[agent8] LLM failed — rule-based only")
+            logger.warning(f"LLM failed — rule-based only")
             confidence     = "MEDIUM" if (criteria_p or criteria_b) else "LOW"
             evidence_notes = " ".join(all_notes)
     else:

@@ -345,7 +345,7 @@ def agent3_insilico(state: VariantState) -> dict:
     gene        = state.get("gene", "UNKNOWN")
     variant_id  = state.get("variant_id", "?")
     consequence = state.get("consequence", "") or ""
-    logger.info(f"[agent3_insilico] Evaluating {variant_id} ({gene}) — {consequence}")
+    logger.info(f" Evaluating {variant_id} ({gene}) — {consequence}")
 
     criteria_p: dict = {}
     criteria_b: dict = {}
@@ -388,7 +388,7 @@ def agent3_insilico(state: VariantState) -> dict:
     if _has_splice_impact(spliceai, maxentscan):
         if "PP3" not in criteria_p:
             criteria_p["PP3"] = "Supporting"
-            logger.info(f"[agent3] SpliceAI/MaxEntScan triggered PP3 for {variant_id}")
+            logger.info(f" SpliceAI/MaxEntScan triggered PP3 for {variant_id}")
         # Also means BP7 cannot apply
         if "BP7" in criteria_b:
             del criteria_b["BP7"]
@@ -411,7 +411,7 @@ def agent3_insilico(state: VariantState) -> dict:
         needs_llm = False
 
     if needs_llm:
-        logger.debug(f"[agent3] Calling LLM for PP3/BP4 on {variant_id}")
+        logger.debug(f" Calling LLM for PP3/BP4 on {variant_id}")
         llm_result = _llm_refine_insilico(
             state, votes_d, votes_b_count, vote_detail, criteria_p, criteria_b
         )
@@ -423,7 +423,7 @@ def agent3_insilico(state: VariantState) -> dict:
             evidence_notes = llm_result.get("evidence_notes", "")
             citations += llm_result.get("citations", [])
         else:
-            logger.warning(f"[agent3] LLM failed for {variant_id} — rule-based only")
+            logger.warning(f" LLM failed for {variant_id} — rule-based only")
             confidence = "LOW"
             evidence_notes = (
                 f"In-silico votes split or borderline for {gene}: "

@@ -223,6 +223,7 @@ def _state_to_row(state: dict, rank: int) -> dict:
         #Additions
         "tavtigian_points":         state.get("tavtigian_points"),
         "tavtigian_classification": state.get("tavtigian_classification") or "",
+        "clinical_notes":           state.get("clinical_notes") or "",  # For phenotype message logic
     }
 
 

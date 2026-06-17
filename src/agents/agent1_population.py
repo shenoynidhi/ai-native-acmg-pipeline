@@ -222,7 +222,7 @@ def agent1_population(state: VariantState) -> dict:
     """
     gene        = state.get("gene", "UNKNOWN")
     variant_id  = state.get("variant_id", "?")
-    logger.info(f"[agent1_population] Evaluating {variant_id} ({gene})")
+    logger.info(f" Evaluating {variant_id} ({gene})")
 
     max_af      = state.get("max_gnomad_af", 0.0) or 0.0
     popmax_af   = state.get("gnomad_af_popmax", 0.0) or 0.0
@@ -281,7 +281,7 @@ def agent1_population(state: VariantState) -> dict:
     )
 
     if is_borderline:
-        logger.debug(f"[agent1] Borderline case for {variant_id} — calling LLM")
+        logger.debug(f" Borderline case for {variant_id} — calling LLM")
         llm_result = _llm_refine(state, criteria_p, criteria_b)
 
         if llm_result and not llm_result.get("error"):
@@ -292,9 +292,9 @@ def agent1_population(state: VariantState) -> dict:
             evidence_notes = llm_result.get("evidence_notes", " ".join(notes_parts))
             citations += llm_result.get("citations", [])
             if llm_result.get("llm_modified_criteria"):
-                logger.info(f"[agent1] LLM modified criteria for {variant_id}")
+                logger.info(f" LLM modified criteria for {variant_id}")
         else:
-            logger.warning(f"[agent1] LLM call failed for {variant_id} — using rule-based only")
+            logger.warning(f" LLM call failed for {variant_id} — using rule-based only")
             confidence = "MEDIUM"
             evidence_notes = " ".join(notes_parts) or (
                 f"No population frequency criteria fired for {gene}. "

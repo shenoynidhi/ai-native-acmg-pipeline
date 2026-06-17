@@ -392,7 +392,7 @@ def agent5_functional(state: VariantState) -> dict:
     variant_id  = state.get("variant_id", "?")
     consequence = state.get("consequence", "") or ""
     protein_pos = state.get("protein_position")
-    logger.info(f"[agent5_functional] Evaluating {variant_id} ({gene}) pos={protein_pos}")
+    logger.info(f" Evaluating {variant_id} ({gene}) pos={protein_pos}")
 
     criteria_p: dict = {}
     criteria_b: dict = {}
@@ -417,7 +417,7 @@ def agent5_functional(state: VariantState) -> dict:
                 f"for {gene} pos {protein_pos}"
             )
         except Exception as e:
-            logger.warning(f"[agent5] UniProt RAG query failed: {e}")
+            logger.warning(f" UniProt RAG query failed: {e}")
             all_notes.append(f"UniProt domain query failed: {e}")
 
     # --- Step 2: PM1 rule-based ---
@@ -458,9 +458,9 @@ def agent5_functional(state: VariantState) -> dict:
             query_type="functional",
             max_results=10,
         )
-        logger.debug(f"[agent5] PubMed returned {len(pubmed_hits)} functional papers for {variant_id}")
+        logger.debug(f" PubMed returned {len(pubmed_hits)} functional papers for {variant_id}")
     except Exception as e:
-        logger.warning(f"[agent5] PubMed search failed: {e}")
+        logger.warning(f" PubMed search failed: {e}")
         all_notes.append(f"PubMed search failed: {e}")
 
     # --- Step 4: LLM refinement ---
@@ -473,7 +473,7 @@ def agent5_functional(state: VariantState) -> dict:
     needs_llm = True  # PS3/BS3 always need LLM; PM1 benefits from confirmation
 
     if needs_llm:
-        logger.debug(f"[agent5] Calling LLM for PS3/BS3/PM1 on {variant_id}")
+        logger.debug(f" Calling LLM for PS3/BS3/PM1 on {variant_id}")
         llm_result = _llm_refine(
             state, criteria_p, criteria_b,
             domain_hits, ps3_signal, bs3_signal, pubmed_hits, all_notes,
@@ -495,7 +495,7 @@ def agent5_functional(state: VariantState) -> dict:
                 criteria_p["PM1"] = llm_p["PM1"]
             elif "PM1" in criteria_p and not llm_result.get("pm1_confirmed", True):
                 # LLM explicitly disagrees with PM1
-                logger.info(f"[agent5] LLM overrode PM1 for {variant_id}")
+                logger.info(f" LLM overrode PM1 for {variant_id}")
                 del criteria_p["PM1"]
                 all_notes.append("LLM: PM1 not confirmed — position not in critical domain.")
 
@@ -509,7 +509,7 @@ def agent5_functional(state: VariantState) -> dict:
                     "PS3/BS3 not assigned."
                 )
         else:
-            logger.warning(f"[agent5] LLM failed for {variant_id}")
+            logger.warning(f" LLM failed for {variant_id}")
             confidence = "LOW"
             evidence_notes = " ".join(all_notes) or (
                 f"Functional evidence evaluation incomplete for {gene} {variant_id}. "

@@ -246,7 +246,7 @@ def agent9_phenotype(state: VariantState) -> dict:
     """
     gene       = state.get("gene", "UNKNOWN")
     variant_id = state.get("variant_id", "?")
-    logger.info(f"[agent9_phenotype] Evaluating {variant_id} ({gene})")
+    logger.info(f" Evaluating {variant_id} ({gene})")
 
     patient_hpo_terms  = state.get("patient_hpo_terms") or []
     hpo_matched_genes  = state.get("hpo_matched_genes") or []
@@ -279,7 +279,7 @@ def agent9_phenotype(state: VariantState) -> dict:
     needs_llm = bool(patient_hpo_terms) and bool(orphanet_diseases)
 
     if needs_llm:
-        logger.debug(f"[agent9] Calling LLM for {variant_id}")
+        logger.debug(f" Calling LLM for {variant_id}")
         llm_result = _llm_refine(state, criteria_p, criteria_b, all_notes)
         if llm_result and not llm_result.get("error"):
             criteria_p     = llm_result.get("criteria_pathogenic", criteria_p)
@@ -288,7 +288,7 @@ def agent9_phenotype(state: VariantState) -> dict:
             evidence_notes = llm_result.get("evidence_notes", " ".join(all_notes))
             citations     += llm_result.get("citations", [])
         else:
-            logger.warning(f"[agent9] LLM failed — rule-based only")
+            logger.warning(f" LLM failed — rule-based only")
             confidence     = "MEDIUM" if (criteria_p or criteria_b) else "LOW"
             evidence_notes = " ".join(all_notes)
     else:
