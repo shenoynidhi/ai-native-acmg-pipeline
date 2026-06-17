@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACMG Variant Classification Pipeline</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧬 ACMG Variant Classification Pipeline</h1>
+            <p class="subtitle">AI-native multi-agent system for automated ACMG/AMP variant classification</p>
+        </header>
+
+        <!-- Registration Section -->
+        <section id="register-section" class="card">
+            <h2>New User Registration</h2>
+            <form id="register-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="name">Name</label>
+                    <input type="text" id="name" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="organisation">Organisation (Optional)</label>
+                    <input type="text" id="organisation" name="organisation">
+                </div>
+                <button type="submit" class="btn btn-primary">Register</button>
+            </form>
+            <div id="register-result" class="result-box hidden"></div>
+            <p class="help-text">Already have an API key? <a href="#" onclick="showAnalysis()">Go to analysis</a></p>
+        </section>
+
+        <!-- Analysis Section -->
+        <section id="analysis-section" class="card hidden">
+            <h2>Submit VCF for Analysis</h2>
+
+            <form id="analysis-form">
+                <div class="form-group">
+                    <label for="api-key">API Key *</label>
+                    <input type="password" id="api-key" name="api-key" required placeholder="Your API key">
+                    <small>Don't have an API key? <a href="#" onclick="showRegister()">Register here</a></small>
+                </div>
+
+                <div class="form-group">
+                    <label for="vcf-file">VCF File *</label>
+                    <div class="file-upload">
+                        <input type="file" id="vcf-file" name="vcf-file" accept=".vcf,.vcf.gz" required>
+                        <label for="vcf-file" class="file-label">Choose VCF file...</label>
+                        <span id="file-name" class="file-name"></span>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="genome-build">Genome Build *</label>
+                        <select id="genome-build" name="genome-build">
+                            <option value="GRCh38" selected>GRCh38</option>
+                            <option value="GRCh37">GRCh37</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="proband-sex">Proband Sex</label>
+                        <select id="proband-sex" name="proband-sex">
+                            <option value="unknown" selected>Unknown</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="clinical-notes">Clinical Notes</label>
+                    <textarea id="clinical-notes" name="clinical-notes" rows="3"
+                        placeholder="Patient presents with seizures, developmental delay, and hypotonia..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="hpo-terms">HPO Terms (comma-separated)</label>
+                    <input type="text" id="hpo-terms" name="hpo-terms"
+                        placeholder="HP:0001250, HP:0001263, HP:0001252">
+                </div>
+
+                <div class="form-group">
+                    <label for="case-db">Case Database (Optional)</label>
+                    <div class="file-upload">
+                        <input type="file" id="case-db" name="case-db" accept=".csv">
+                        <label for="case-db" class="file-label">Choose CSV file...</label>
+                        <span id="case-db-name" class="file-name"></span>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-large">Start Analysis</button>
+            </form>
+        </section>
+
+        <!-- Progress Section -->
+        <section id="progress-section" class="card hidden">
+            <h2>Analysis in Progress</h2>
+            <div class="progress-container">
+                <div class="progress-header">
+                    <span id="progress-status">Queued...</span>
+                    <span id="progress-percent">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <div id="progress-message" class="progress-message">Initializing...</div>
+                <div id="progress-details" class="progress-details"></div>
+            </div>
+            <div id="session-info" class="info-box">
+                <strong>Session ID:</strong> <span id="session-id"></span>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section id="results-section" class="card hidden">
+            <h2>✓ Analysis Complete</h2>
+            <div class="results-summary">
+                <div class="result-stat">
+                    <span class="stat-label">Variants Classified:</span>
+                    <span id="variant-count" class="stat-value">-</span>
+                </div>
+                <div class="result-stat">
+                    <span class="stat-label">Session ID:</span>
+                    <span id="result-session-id" class="stat-value">-</span>
+                </div>
+            </div>
+
+            <div class="download-buttons">
+                <button onclick="downloadReport('html')" class="btn btn-success">
+                    📄 Download HTML Report
+                </button>
+                <button onclick="downloadReport('xlsx')" class="btn btn-success">
+                    📊 Download Excel Report
+                </button>
+                <button onclick="downloadReport('tsv')" class="btn btn-success">
+                    📋 Download TSV Report
+                </button>
+            </div>
+
+            <button onclick="startNew()" class="btn btn-secondary">Analyze Another VCF</button>
+        </section>
+
+        <!-- Error Section -->
+        <section id="error-section" class="card error-card hidden">
+            <h2>❌ Error</h2>
+            <div id="error-message" class="error-message"></div>
+            <button onclick="startNew()" class="btn btn-secondary">Try Again</button>
+        </section>
+
+        <footer>
+            <p>&copy; 2026 ACMG Pipeline | <a href="/docs" target="_blank">API Documentation</a> | <a href="/health">Health Check</a></p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+
