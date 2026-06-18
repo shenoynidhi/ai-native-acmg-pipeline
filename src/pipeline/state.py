@@ -215,6 +215,11 @@ class VariantState(TypedDict):
     tavtigian_classification:   Optional[str]
 
     # -------------------------------------------------------------------------
+    # Phase 10.5 — clinical actionability (populated by clinical_actionability_node)
+    # -------------------------------------------------------------------------
+    actionability_result: Optional[dict]  # Therapeutic recommendations from ASCO/NCCN/ESMO/OncoKB/CIViC
+
+    # -------------------------------------------------------------------------
     # Phase 11 — phenotype / HPO  (populated by hpo_* and phenotype_scorer nodes)
     # -------------------------------------------------------------------------
     # Patient HPO terms — shared across all variants in a session.
@@ -387,6 +392,9 @@ def build_initial_state(
         all_citations =                       [],
         tavtigian_points          = None,
         tavtigian_classification  = None,
+
+        # --- actionability ---
+        actionability_result = None,
 
         # --- phenotype ---
         clinical_notes = clinical_notes,

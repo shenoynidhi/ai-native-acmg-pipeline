@@ -476,6 +476,160 @@
     .tav-badge.Benign            { background: #C8E6C9; color: #1B5E20; }
 
     .tav-note { color: var(--ink-light); font-size: 11px; }
+
+    /* ── Clinical Actionability ─────────────────────────────────────────── */
+    .actionability-section {
+      margin-top: 16px;
+      padding: 14px;
+      background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+      border: 1px solid #90caf9;
+      border-radius: 6px;
+    }
+    .actionability-section h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1565c0;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .actionability-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .evidence-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .evidence-badge.FDA_Level1 { background: #1b5e20; color: #fff; }
+    .evidence-badge.NCCN_Category1 { background: #1565c0; color: #fff; }
+    .evidence-badge.NCCN_Category2A { background: #1976d2; color: #fff; }
+    .evidence-badge.Clinical_Trial { background: #f57f17; color: #fff; }
+    .evidence-badge.Preclinical { background: #7b1fa2; color: #fff; }
+    .evidence-badge.Insufficient { background: #757575; color: #fff; }
+    .evidence-badge.Not_Applicable { background: #9e9e9e; color: #fff; }
+
+    .therapy-list { display: flex; flex-direction: column; gap: 10px; }
+    .therapy-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-left: 4px solid #1976d2;
+      border-radius: 4px;
+      padding: 10px;
+    }
+    .therapy-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .therapy-header h5 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      margin: 0;
+    }
+    .therapy-badges {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .therapy-badge {
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .therapy-badge.fda { background: #1b5e20; color: #fff; }
+    .therapy-badge.nccn { background: #1565c0; color: #fff; }
+    .therapy-badge.trial { background: #f57f17; color: #fff; }
+
+    .therapy-body {
+      font-size: 11.5px;
+      color: var(--ink-mid);
+      line-height: 1.5;
+    }
+    .therapy-body p {
+      margin: 3px 0;
+    }
+    .therapy-body strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .counseling-box {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-left: 4px solid #7b1fa2;
+      border-radius: 4px;
+      padding: 10px;
+      margin-top: 10px;
+      font-size: 11.5px;
+      line-height: 1.6;
+      color: var(--ink-mid);
+    }
+
+    .trial-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .trial-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-left: 4px solid #f57f17;
+      border-radius: 4px;
+      padding: 8px;
+      font-size: 11px;
+    }
+    .trial-card h5 {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+    .trial-card h5 a {
+      color: #f57f17;
+    }
+
+    .guideline-refs {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #e0e0e0;
+      font-size: 10px;
+      color: var(--ink-light);
+    }
+    .guideline-refs strong {
+      font-weight: 600;
+      color: var(--ink);
+      display: block;
+      margin-bottom: 4px;
+    }
+    .guideline-refs ul {
+      margin: 0;
+      padding-left: 18px;
+      list-style-type: disc;
+    }
+    .guideline-refs li {
+      margin: 2px 0;
+      line-height: 1.4;
+    }
+
+    .actionability-skip {
+      font-size: 11.5px;
+      color: var(--ink-mid);
+      font-style: italic;
+    }
+
     @media print {
       body { background: #fff; font-size: 11px; }
       .page-body { padding: 0 8px; max-width: 100%; }
@@ -746,6 +900,128 @@
           <span class="df-value">{{ row.reclassification_conditions }}</span>
         </div>
         {% endif %}
+
+        <!-- Clinical Actionability Section -->
+        {% if row.actionability_result %}
+        {% set actionability = row.actionability_result %}
+        <div class="actionability-section">
+          <div class="actionability-header">
+            <h4>🎯 Clinical Actionability</h4>
+            {% if actionability.overall_evidence_level %}
+            <span class="evidence-badge {{ actionability.overall_evidence_level }}">
+              {{ actionability.overall_evidence_level | replace('_', ' ') }}
+            </span>
+            {% endif %}
+          </div>
+
+          {% if actionability.skip_reason %}
+          <!-- Skipped with reason -->
+          <p class="actionability-skip">{{ actionability.skip_reason }}</p>
+
+          {% else %}
+          <!-- Full actionability display -->
+
+          {% if actionability.summary %}
+          <div style="font-size:12px; color:var(--ink); margin-bottom:12px; line-height:1.5">
+            {{ actionability.summary }}
+          </div>
+          {% endif %}
+
+          {% if actionability.therapy_recommendations and actionability.therapy_recommendations|length > 0 %}
+          <h4 style="margin-top:10px">💊 Therapeutic Recommendations</h4>
+          <div class="therapy-list">
+            {% for therapy in actionability.therapy_recommendations %}
+            <div class="therapy-card">
+              <div class="therapy-header">
+                <h5>{{ therapy.drug }}</h5>
+                <div class="therapy-badges">
+                  {% if therapy.fda_approved %}
+                  <span class="therapy-badge fda">FDA</span>
+                  {% endif %}
+                  {% if therapy.evidence_level %}
+                  <span class="evidence-badge {{ therapy.evidence_level }}" style="font-size:9px; padding:2px 6px">
+                    {{ therapy.evidence_level | replace('_', ' ') }}
+                  </span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="therapy-body">
+                {% if therapy.indication %}
+                <p><strong>Indication:</strong> {{ therapy.indication }}</p>
+                {% endif %}
+                {% if therapy.mechanism %}
+                <p><strong>Mechanism:</strong> {{ therapy.mechanism }}</p>
+                {% endif %}
+                {% if therapy.guideline_source %}
+                <p><strong>Guideline:</strong> {{ therapy.guideline_source }}</p>
+                {% endif %}
+                {% if therapy.references and therapy.references|length > 0 %}
+                <p><strong>References:</strong>
+                  {% for ref in therapy.references %}
+                  {% if ref.startswith('PMID:') %}
+                  <a href="https://pubmed.ncbi.nlm.nih.gov/{{ ref[5:] }}" target="_blank">{{ ref }}</a>{% if not loop.last %}, {% endif %}
+                  {% elif ref.startswith('NCT') %}
+                  <a href="https://clinicaltrials.gov/ct2/show/{{ ref }}" target="_blank">{{ ref }}</a>{% if not loop.last %}, {% endif %}
+                  {% else %}
+                  {{ ref }}{% if not loop.last %}, {% endif %}
+                  {% endif %}
+                  {% endfor %}
+                </p>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          {% if actionability.clinical_trial_matches and actionability.clinical_trial_matches|length > 0 %}
+          <h4 style="margin-top:12px">🔬 Clinical Trial Matches</h4>
+          <div class="trial-list">
+            {% for trial in actionability.clinical_trial_matches %}
+            <div class="trial-card">
+              <h5>
+                {% if trial.nct_id %}
+                <a href="https://clinicaltrials.gov/ct2/show/{{ trial.nct_id }}" target="_blank">
+                  {{ trial.nct_id }}
+                </a>
+                {% endif %}
+              </h5>
+              {% if trial.title %}<p>{{ trial.title }}</p>{% endif %}
+              {% if trial.phase or trial.status %}
+              <p style="color:var(--ink-light); font-size:10px">
+                {% if trial.phase %}{{ trial.phase }}{% endif %}
+                {% if trial.phase and trial.status %} | {% endif %}
+                {% if trial.status %}{{ trial.status }}{% endif %}
+              </p>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          {% if actionability.genetic_counseling_recommendations %}
+          <h4 style="margin-top:12px">🧬 Genetic Counseling Recommendations</h4>
+          <div class="counseling-box">
+            {{ actionability.genetic_counseling_recommendations }}
+          </div>
+          {% endif %}
+
+          {% if actionability.guideline_references and actionability.guideline_references|length > 0 %}
+          <div class="guideline-refs">
+            <strong>Guidelines Referenced:</strong>
+            <ul>
+              {% for ref in actionability.guideline_references %}
+              <li>{{ ref }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+
+          {% endif %}
+        </div>
+        {% endif %}
+        <!-- End Clinical Actionability Section -->
+
       </div>
       <!-- Right: Scores, phenotype, technical detail -->
       <div class="detail-section">
