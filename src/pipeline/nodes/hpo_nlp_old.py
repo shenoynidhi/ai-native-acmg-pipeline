@@ -36,50 +36,15 @@ Output format per term:
 
 import re
 import logging
-import hashlib
 import requests
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from src.pipeline.state import VariantState
 from src.utils.llm_client import call_llm_json
-from src.config import DATABASE_PATHS, CACHE_HPO_NLP
+from src.config import DATABASE_PATHS
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# HPO NLP Cache (in-memory)
-# ---------------------------------------------------------------------------
-# Cache HPO extraction results by hash of clinical notes
-# Same clinical notes → same HPO terms (no need to re-run LLM + Doc2HPO)
-_HPO_CACHE: Dict[str, List[Dict]] = {}
-
-def _get_cache_key(clinical_notes: str) -> str:
-    """Generate cache key from clinical notes."""
-    if not clinical_notes:
-        return ""
-    return hashlib.md5(clinical_notes.encode('utf-8')).hexdigest()
-
-def _check_cache(clinical_notes: str) -> Optional[List[Dict]]:
-    """Check if HPO terms are cached for these clinical notes."""
-    if not CACHE_HPO_NLP or not clinical_notes:
-        return None
-
-    cache_key = _get_cache_key(clinical_notes)
-    if cache_key in _HPO_CACHE:
-        logger.info(f"[hpo_nlp] Cache HIT for notes hash {cache_key[:8]}... (skipping LLM + Doc2HPO)")
-        return _HPO_CACHE[cache_key]
-
-    return None
-
-def _save_to_cache(clinical_notes: str, hpo_terms: List[Dict]) -> None:
-    """Save HPO terms to cache."""
-    if not CACHE_HPO_NLP or not clinical_notes:
-        return
-
-    cache_key = _get_cache_key(clinical_notes)
-    _HPO_CACHE[cache_key] = hpo_terms
-    logger.info(f"[hpo_nlp] Cached {len(hpo_terms)} HPO terms for hash {cache_key[:8]}...")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -452,13 +417,11 @@ def hpo_nlp_node(state: VariantState) -> dict:
     LangGraph node: extract, validate, and merge HPO terms from clinical_notes.
 
     Flow:
-      0. Check cache (if enabled) - return cached results if available
       1. Doc2HPO extraction  (primary; skipped gracefully if API unreachable)
       2. LLM extraction      (secondary; always attempted)
       3. hp.obo validation   (both term sets independently)
       4. Merge + deduplicate
-      5. Save to cache (if enabled)
-      6. Write patient_hpo_terms to state
+      5. Write patient_hpo_terms to state
     """
     _load_hpo_obo()
 
@@ -466,11 +429,6 @@ def hpo_nlp_node(state: VariantState) -> dict:
     if not clinical_notes.strip():
         logger.warning("hpo_nlp_node called with empty clinical_notes — returning [].")
         return {"patient_hpo_terms": []}
-
-    # Check cache first
-    cached_terms = _check_cache(clinical_notes)
-    if cached_terms is not None:
-        return {"patient_hpo_terms": cached_terms}
 
     # --- Source A: Doc2HPO ---
     doc2hpo_raw       = _doc2hpo_extract(clinical_notes)
@@ -487,9 +445,6 @@ def hpo_nlp_node(state: VariantState) -> dict:
 
     final_terms = _merge_terms(doc2hpo_validated, llm_validated)
 
-    # Save to cache for future use
-    _save_to_cache(clinical_notes, final_terms)
-
     present_count = sum(1 for t in final_terms if t["present"])
     absent_count  = len(final_terms) - present_count
     logger.info(
@@ -498,4 +453,3 @@ def hpo_nlp_node(state: VariantState) -> dict:
     )
 
     return {"patient_hpo_terms": final_terms}
-

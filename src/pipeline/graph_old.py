@@ -101,6 +101,11 @@ from src.pipeline.nodes.debate_final_arbiter import debate_final_arbiter_node as
 # Real: LLM weighs debate, issues final_classification + evidence_summary
 
 
+# --- Clinical actionability (Phase 8.5) -------------------------------------
+from src.pipeline.nodes.clinical_actionability import clinical_actionability_node
+# Real: queries ASCO/NCCN/ESMO/OncoKB/CIViC for therapeutic recommendations
+
+
 # --- HPO / phenotype stubs (Phase 9) ----------------------------------------
 from src.pipeline.nodes.hpo_nlp import hpo_nlp_node as hpo_nlp_node 
 # Real: extracts HPO term IDs from clinical_notes free text using LLM
@@ -266,6 +271,9 @@ def build_variant_graph() -> StateGraph:
     graph.add_node("benign_advocate",     benign_advocate_node)
     graph.add_node("final_arbiter",       final_arbiter_node)
 
+    # Clinical actionability
+    graph.add_node("clinical_actionability", clinical_actionability_node)
+
     # HPO / phenotype
     graph.add_node("hpo_nlp",            hpo_nlp_node)
     graph.add_node("hpo_matcher",        hpo_matcher_node)
@@ -304,9 +312,12 @@ def build_variant_graph() -> StateGraph:
     graph.add_edge("pathogenic_advocate", "benign_advocate")
     graph.add_edge("benign_advocate",     "final_arbiter")
 
+    # Clinical actionability (runs after final classification)
+    graph.add_edge("final_arbiter",       "clinical_actionability")
+
     # Conditional: skip HPO NLP if terms already provided
     graph.add_conditional_edges(
-        "final_arbiter",
+        "clinical_actionability",
         _should_run_hpo_nlp,
         {"run_nlp": "hpo_nlp", "skip_nlp": "hpo_matcher"},
     )
@@ -324,3 +335,4 @@ def build_variant_graph() -> StateGraph:
 # =============================================================================
 
 VARIANT_GRAPH = build_variant_graph().compile()
+

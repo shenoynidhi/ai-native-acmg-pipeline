@@ -54,16 +54,27 @@ from src.pipeline.nodes.phasing             import phasing_node
 from src.pipeline.nodes.post_process        import post_process_node
 
 # --- Agent stubs (Phase 6) ---------------------------------------------------
-# Replace with: src/agents/agent{N}_{name}.py
+# Speed optimization: Use rule-based agents where deterministic
+from src.config import USE_RULE_BASED_AGENTS
 
-from src.agents.agent1_population import agent1_population as agent1_node
-# Real: evaluates BA1, BS1, BS2, PM2 (population frequency criteria)
+if USE_RULE_BASED_AGENTS:
+    # Use fast deterministic implementations (no LLM)
+    from src.agents.rules.deterministic_agents import (
+        agent1_population_rules as agent1_node,
+        agent3_insilico_rules as agent3_node,
+        agent7_denovo_rules as agent7_node,
+    )
+    logger.info("[graph] Using rule-based agents for 1, 3, 7 (speed optimization enabled)")
+else:
+    # Use LLM-based implementations (original)
+    from src.agents.agent1_population import agent1_population as agent1_node
+    from src.agents.agent3_insilico import agent3_insilico as agent3_node
+    from src.agents.agent7_denovo import agent7_denovo as agent7_node
+    logger.info("[graph] Using LLM-based agents (speed optimization disabled)")
 
+# These agents always use their current implementation
 from src.agents.agent2_consequence import agent2_consequence as agent2_node
 # Real: evaluates PVS1 (null variant / loss-of-function — 5-caveat decision tree)
-
-from src.agents.agent3_insilico    import agent3_insilico    as agent3_node
-# Real: evaluates PP3, BP4, BP7 (in-silico predictor consensus)
 
 from src.agents.agent4_database import agent4_database as agent4_node
 # Real: evaluates PS1, PS4, PP5, BP6 — uses RAG (ChromaDB ClinVar collection)
@@ -73,9 +84,6 @@ from src.agents.agent5_functional import agent5_functional as agent5_node
 
 from src.agents.agent6_segregation import agent6_segregation as agent6_node
 # Real: evaluates PP1, PM3, BP2, BS4 (segregation / phase evidence)
-
-from src.agents.agent7_denovo import agent7_denovo as agent7_node
-# Real: evaluates PS2, PM6 (de novo status — trio mode)
 
 from src.agents.agent8_gene_context import agent8_gene_context as agent8_node
 # Real: evaluates PM4, PM5, PP2, BP1, BP3 — uses RAG + RepeatMasker

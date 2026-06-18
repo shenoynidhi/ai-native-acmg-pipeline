@@ -72,6 +72,16 @@ LLM_MODEL:    str = os.getenv("LLM_MODEL",    "qwen2.5-14b")
 LLM_API_KEY:  str = os.getenv("LLM_API_KEY",  "dummy")
 
 # ---------------------------------------------------------------------------
+# Speed Optimization Flags
+# ---------------------------------------------------------------------------
+# Use rule-based (deterministic) agents instead of LLM where possible
+# Agents 1, 3, 7 have 100% deterministic rules → faster + more accurate
+USE_RULE_BASED_AGENTS: bool = os.getenv("USE_RULE_BASED_AGENTS", "true").lower() == "true"
+
+# Cache HPO NLP results (same clinical notes → same HPO terms)
+CACHE_HPO_NLP: bool = os.getenv("CACHE_HPO_NLP", "true").lower() == "true"
+
+# ---------------------------------------------------------------------------
 # PipelineConfig — all tunable parameters for a single run
 # ---------------------------------------------------------------------------
 
