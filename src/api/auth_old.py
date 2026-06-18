@@ -52,8 +52,7 @@ def register_user(request: RegisterRequest, db: Session) -> RegisterResponse:
         api_key_hash=api_key_hash,
         max_analyses=100,  # Default quota
         analyses_used=0,
-        is_active=True,
-        ncbi_api_key=request.ncbi_api_key  # Optional NCBI key
+        is_active=True
     )
 
     db.add(user)
@@ -161,44 +160,4 @@ def optional_api_key(
         return verify_api_key(x_api_key=x_api_key, db=db)
     except HTTPException:
         return None
-
-
-# ---------------------------------------------------------------------------
-# Admin Authentication
-# ---------------------------------------------------------------------------
-
-def verify_admin(
-    x_api_key: str = Header(..., description="Admin API key"),
-    db: Session = Depends(get_db)
-) -> User:
-    """
-    Verify API key belongs to an admin user.
-
-    Use this as a dependency for admin-only endpoints:
-        @app.get("/admin/users")
-        def list_users(admin: User = Depends(verify_admin)):
-            ...
-
-    Args:
-        x_api_key: API key from X-API-Key header
-        db: Database session (injected)
-
-    Returns:
-        User object if admin authentication succeeds
-
-    Raises:
-        HTTPException 401 if key invalid
-        HTTPException 403 if user not admin
-    """
-    # First verify it's a valid user
-    user = verify_api_key(x_api_key=x_api_key, db=db)
-
-    # Check if user has admin flag
-    if not user.is_admin:
-        raise HTTPException(
-            status_code=403,
-            detail="Admin access required. This endpoint is restricted to administrators."
-        )
-
-    return user
 

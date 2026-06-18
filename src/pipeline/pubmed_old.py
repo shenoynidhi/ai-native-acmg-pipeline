@@ -273,4 +273,3 @@ def pubmed_format_for_llm(papers: list[dict], max_papers: int = 8) -> str:
             f"{p['journal']}: {p['title']}"
         )
     return "\n".join(lines)
-

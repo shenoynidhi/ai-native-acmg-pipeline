@@ -19,51 +19,12 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     name: str
     organisation: Optional[str] = None
-    ncbi_api_key: Optional[str] = Field(
-        None,
-        description="Optional NCBI E-utilities API key for faster PubMed searches. Get one free at: https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/"
-    )
 
 
 class RegisterResponse(BaseModel):
     """Response after successful registration - API key shown only once."""
     user_id: str
     api_key: str  # Plain text - never stored, shown only once
-    message: str
-
-
-class RegenerateKeyRequest(BaseModel):
-    """Request to regenerate API key for a user who lost theirs."""
-    email: EmailStr
-
-
-class RegenerateKeyResponse(BaseModel):
-    """Response after regenerating API key - new key shown only once."""
-    user_id: str
-    new_api_key: str
-    message: str
-
-
-class RequestKeyResetRequest(BaseModel):
-    """Request to send verification code for key reset."""
-    email: EmailStr
-
-
-class RequestKeyResetResponse(BaseModel):
-    """Response after requesting key reset."""
-    message: str
-
-
-class ConfirmKeyResetRequest(BaseModel):
-    """Confirm key reset with verification code."""
-    email: EmailStr
-    code: str = Field(..., min_length=6, max_length=6, pattern="^[0-9]{6}$")
-
-
-class ConfirmKeyResetResponse(BaseModel):
-    """Response after confirming key reset with code."""
-    user_id: str
-    new_api_key: str
     message: str
 
 

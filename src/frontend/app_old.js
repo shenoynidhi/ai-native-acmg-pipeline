@@ -127,10 +127,13 @@ document.getElementById('analysis-form').addEventListener('submit', async (e) =>
             currentSessionId = result.session_id;
             document.getElementById('session-id').textContent = result.session_id;
 
-            // Start polling for status (and try SSE if available)
-            pollStatus();
-            // TODO: Enable SSE when endpoint is ready
-            // connectSSE();
+            // Try SSE first, fallback to polling if SSE fails
+            try {
+                connectSSE();
+            } catch (error) {
+                console.error('SSE failed, falling back to polling:', error);
+                pollStatus();
+            }
         } else {
             showError(result.detail || 'Analysis submission failed');
         }
@@ -192,32 +195,70 @@ function connectSSE() {
         eventSource.close();
     }
 
-    // TODO: Implement SSE endpoint in backend first
-    // eventSource = new EventSource(`/stream/${currentSessionId}?api_key=${currentApiKey}`);
+    // Note: EventSource doesn't support custom headers, so we pass API key as query param
+    // In production, use a short-lived token instead
+    const url = `/stream/${currentSessionId}?api_key=${encodeURIComponent(currentApiKey)}`;
 
-    // eventSource.addEventListener('progress', (e) => {
-    //     const data = JSON.parse(e.data);
-    //     updateProgress(
-    //         data.progress * 100,
-    //         data.stage,
-    //         data.message,
-    //         data.variant_id ? `Current: ${data.gene} (${data.variant_id})` : ''
-    //     );
-    // });
+    eventSource = new EventSource(url);
 
-    // eventSource.addEventListener('complete', (e) => {
-    //     const data = JSON.parse(e.data);
-    //     eventSource.close();
-    //     // Fetch final status
-    //     pollStatus();
-    // });
+    eventSource.addEventListener('connected', (e) => {
+        console.log('SSE connected:', e.data);
+    });
 
-    // eventSource.addEventListener('error', (e) => {
-    //     console.error('SSE error:', e);
-    //     eventSource.close();
-    //     // Fall back to polling
-    //     pollStatus();
-    // });
+    eventSource.addEventListener('progress', (e) => {
+        const data = JSON.parse(e.data);
+        updateProgress(
+            data.progress * 100,
+            data.stage,
+            data.message,
+            data.variant_id ? `Current: ${data.gene} (${data.variant_id})` : ''
+        );
+    });
+
+    eventSource.addEventListener('complete', (e) => {
+        const data = JSON.parse(e.data);
+        eventSource.close();
+        eventSource = null;
+
+        // Fetch final status to get report paths
+        pollStatusOnce();
+    });
+
+    eventSource.addEventListener('failed', (e) => {
+        const data = JSON.parse(e.data);
+        eventSource.close();
+        eventSource = null;
+        showError(data.message || 'Analysis failed');
+    });
+
+    eventSource.onerror = (e) => {
+        console.error('SSE error:', e);
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+        // Fall back to polling
+        pollStatus();
+    };
+}
+
+// Poll status once (for final results after SSE completes)
+async function pollStatusOnce() {
+    if (!currentSessionId || !currentApiKey) return;
+
+    try {
+        const response = await fetch(`/status/${currentSessionId}`, {
+            headers: { 'X-API-Key': currentApiKey }
+        });
+
+        const status = await response.json();
+
+        if (response.ok && status.status === 'complete') {
+            showResults(status);
+        }
+    } catch (error) {
+        console.error('Error fetching final status:', error);
+    }
 }
 
 // Show results

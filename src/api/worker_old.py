@@ -17,6 +17,8 @@ from src.pipeline.runner import run_session
 from src.api.db import SessionLocal, Session as DBSession
 from src.api.models import AnalyzeRequest
 from src.utils.logging_config import ProgressCallback
+from src.mempalace.palace import mine_session_summary
+from src.mempalace.knowledge_graph import record_classification
 
 # Redis broker URL
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -180,6 +182,41 @@ def analyze_variant_task(self, session_id: str, vcf_path: str, params: dict):
             report_paths=report_paths,
             classifications=classifications
         )
+
+        # Store in MemPalace (get user_id from session)
+        db_session = db.query(DBSession).filter(DBSession.session_id == session_id).first()
+        if db_session and db_session.user_id:
+            try:
+                # Mine session summary
+                mine_session_summary(
+                    user_id=str(db_session.user_id),
+                    session_id=session_id,
+                    variant_count=result.get("variant_count", 0),
+                    classifications=classifications,
+                    genome_build=params.get("genome_build", "GRCh38"),
+                    clinical_notes=params.get("clinical_notes", ""),
+                    db=db
+                )
+
+                # Record each variant classification in knowledge graph
+                for state in result.get("completed_states", []):
+                    variant_id = state.get("variant_id")
+                    gene = state.get("gene")
+                    classification = state.get("final_classification", "VUS")
+
+                    if variant_id and gene:
+                        record_classification(
+                            user_id=str(db_session.user_id),
+                            variant_id=variant_id,
+                            gene=gene,
+                            classification=classification,
+                            session_id=session_id,
+                            db=db
+                        )
+
+            except Exception as mem_error:
+                # Don't fail the whole task if MemPalace fails
+                print(f"MemPalace error (non-fatal): {mem_error}")
 
         return {
             "session_id": session_id,

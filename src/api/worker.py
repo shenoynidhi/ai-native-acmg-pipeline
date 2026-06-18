@@ -7,8 +7,11 @@ Wraps the pipeline runner and updates job status in the database.
 
 import os
 import json
+import logging
+import subprocess
 import traceback
 from datetime import datetime
+from pathlib import Path
 from celery import Celery
 from sqlalchemy.orm import Session
 import redis
@@ -19,6 +22,8 @@ from src.api.models import AnalyzeRequest
 from src.utils.logging_config import ProgressCallback
 from src.mempalace.palace import mine_session_summary
 from src.mempalace.knowledge_graph import record_classification
+
+logger = logging.getLogger(__name__)
 
 # Redis broker URL
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -49,6 +54,63 @@ celery_app.conf.update(
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------
+
+def _ensure_vcf_indexed(vcf_path: str) -> None:
+    """
+    Ensure VCF.gz file has tabix index (.tbi).
+    Creates index if missing. Non-fatal if indexing fails.
+
+    Args:
+        vcf_path: Path to .vcf.gz file
+    """
+    if not vcf_path.endswith('.vcf.gz'):
+        logger.debug(f"Skipping indexing for non-gzipped VCF: {vcf_path}")
+        return
+
+    vcf_file = Path(vcf_path)
+    tbi_file = Path(vcf_path + ".tbi")
+    csi_file = Path(vcf_path + ".csi")
+
+    # Check if already indexed
+    if tbi_file.exists() or csi_file.exists():
+        logger.info(f"VCF index already exists: {vcf_path}")
+        return
+
+    logger.info(f"Creating tabix index for {vcf_path}")
+
+    try:
+        # Use tabix to create index
+        result = subprocess.run(
+            ["tabix", "-p", "vcf", vcf_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout for large VCFs
+        )
+
+        if tbi_file.exists():
+            logger.info(f"✓ Successfully created index: {tbi_file}")
+        else:
+            logger.warning(f"tabix completed but no .tbi file found for {vcf_path}")
+
+    except subprocess.CalledProcessError as e:
+        logger.warning(
+            f"tabix indexing failed for {vcf_path} (non-fatal): {e.stderr}\n"
+            f"Pipeline will continue but performance may be slower."
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            f"tabix indexing timed out for {vcf_path} (non-fatal)\n"
+            f"VCF may be very large. Pipeline will continue."
+        )
+    except FileNotFoundError:
+        logger.warning(
+            f"tabix not found in PATH - skipping indexing for {vcf_path}\n"
+            f"Install with: conda install -c bioconda tabix"
+        )
+    except Exception as e:
+        logger.warning(f"Unexpected error during indexing (non-fatal): {e}")
+
 
 def update_session_status(
     db: Session,
@@ -105,6 +167,16 @@ def analyze_variant_task(self, session_id: str, vcf_path: str, params: dict):
     db = SessionLocal()
 
     try:
+        # Ensure VCF is indexed (auto-creates .tbi if missing)
+        logger.info(f"[{session_id}] Checking VCF index...")
+        _ensure_vcf_indexed(vcf_path)
+
+        # Also index parent VCFs if trio mode
+        if params.get("parent1_vcf_path"):
+            _ensure_vcf_indexed(params["parent1_vcf_path"])
+        if params.get("parent2_vcf_path"):
+            _ensure_vcf_indexed(params["parent2_vcf_path"])
+
         # Update status to running
         update_session_status(
             db, session_id,
@@ -138,6 +210,26 @@ def analyze_variant_task(self, session_id: str, vcf_path: str, params: dict):
             )
 
         progress_callback = ProgressCallback(publish_progress)
+
+        # Get user for NCBI key override
+        from src.api.db import User
+        session_obj = db.query(DBSession).filter(DBSession.session_id == session_id).first()
+        if session_obj and session_obj.user:
+            user = session_obj.user
+
+            # Override NCBI API key if user provided their own
+            if user.ncbi_api_key:
+                logger.info(f"[{session_id}] Using user-provided NCBI API key")
+                os.environ["NCBI_API_KEY"] = user.ncbi_api_key
+            else:
+                # Fall back to system-wide NCBI key
+                system_ncbi_key = os.getenv("SYSTEM_NCBI_API_KEY", "")
+                if system_ncbi_key:
+                    os.environ["NCBI_API_KEY"] = system_ncbi_key
+                else:
+                    # No key available - pubmed will use no-key rate limit (3 req/sec)
+                    logger.debug(f"[{session_id}] No NCBI API key - using public rate limit")
+                    os.environ["NCBI_API_KEY"] = ""
 
         # Run the pipeline with progress callback
         result = run_session(

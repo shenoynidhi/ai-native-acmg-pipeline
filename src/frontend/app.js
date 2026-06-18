@@ -51,7 +51,8 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
     const formData = {
         email: document.getElementById('email').value,
         name: document.getElementById('name').value,
-        organisation: document.getElementById('organisation').value || null
+        organisation: document.getElementById('organisation').value || null,
+        ncbi_api_key: document.getElementById('ncbi-key').value || null
     };
 
     try {

@@ -9,6 +9,7 @@ import os
 import json
 import uuid
 import asyncio
+import redis
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -22,9 +23,12 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 
 from src.api.db import get_db, User, Session as DBSession
-from src.api.auth import register_user, verify_api_key, increment_usage
+from src.api.auth import register_user, verify_api_key, verify_admin, increment_usage
 from src.api.models import (
     RegisterRequest, RegisterResponse,
+    RegenerateKeyRequest, RegenerateKeyResponse,
+    RequestKeyResetRequest, RequestKeyResetResponse,
+    ConfirmKeyResetRequest, ConfirmKeyResetResponse,
     AnalyzeRequest, AnalyzeResponse,
     StatusResponse, HistoryResponse, HistoryItem,
     RerunRequest, ErrorResponse
@@ -69,6 +73,275 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     The API key is shown only once - save it securely!
     """
     return register_user(request, db)
+
+
+@app.post("/regenerate-key", response_model=RegenerateKeyResponse, tags=["Authentication"])
+def regenerate_api_key(request: RegenerateKeyRequest, db: Session = Depends(get_db)):
+    """
+    Regenerate API key for a user who lost theirs.
+
+    **Security Note:** In production, add email verification:
+    1. User requests reset via email
+    2. System sends verification code to email
+    3. User confirms with code
+    4. System generates new key
+
+    For MVP: Simple email-based regeneration without verification.
+    Use this endpoint responsibly - verify user identity before calling.
+    """
+    import secrets
+    import bcrypt
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Find user by email
+    user = db.query(User).filter(User.email == request.email).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found. Please check your email address."
+        )
+
+    # Generate new API key
+    new_api_key = secrets.token_urlsafe(32)
+
+    # Hash the new key
+    api_key_hash = bcrypt.hashpw(
+        new_api_key.encode('utf-8'),
+        bcrypt.gensalt()
+    ).decode('utf-8')
+
+    # Update user's API key hash
+    user.api_key_hash = api_key_hash
+    db.commit()
+
+    logger.info(f"API key regenerated for user: {user.email} (user_id: {user.user_id})")
+
+    return RegenerateKeyResponse(
+        user_id=str(user.user_id),
+        new_api_key=new_api_key,
+        message="New API key generated successfully. Save it now - it won't be shown again!"
+    )
+
+
+@app.post("/request-key-reset", response_model=RequestKeyResetResponse, tags=["Authentication"])
+def request_key_reset(request: RequestKeyResetRequest, db: Session = Depends(get_db)):
+    """
+    Request API key reset - sends 6-digit verification code to user's email.
+
+    **Step 1 of 2:** User provides email, receives verification code.
+
+    **Production Setup Required:**
+    - Configure SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD environment variables
+    - Or use SendGrid/AWS SES API keys
+
+    If email service not configured, this endpoint will return success but won't send email.
+    In that case, admin can manually provide the code to the user.
+    """
+    import secrets
+    import random
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Find user (don't reveal if email exists for security)
+    user = db.query(User).filter(User.email == request.email).first()
+
+    if not user:
+        # Return success anyway to prevent email enumeration
+        return RequestKeyResetResponse(
+            message="If an account exists with this email, a verification code has been sent."
+        )
+
+    # Generate 6-digit code
+    code = str(random.randint(100000, 999999))
+
+    # Store code in Redis with 15-minute expiration
+    try:
+        redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+        redis_client.setex(f"reset:{user.user_id}", 900, code)  # 15 minutes
+
+        logger.info(f"Key reset code generated for {user.email}: {code} (expires in 15 min)")
+
+        # Send email with code
+        email_sent = _send_reset_email(user.email, user.name, code)
+
+        if email_sent:
+            logger.info(f"Reset code email sent to {user.email}")
+        else:
+            logger.warning(f"Email service not configured - code not sent. Manual code: {code}")
+
+    except Exception as e:
+        logger.error(f"Failed to generate reset code: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process reset request")
+
+    return RequestKeyResetResponse(
+        message="If an account exists with this email, a verification code has been sent."
+    )
+
+
+@app.post("/confirm-key-reset", response_model=ConfirmKeyResetResponse, tags=["Authentication"])
+def confirm_key_reset(request: ConfirmKeyResetRequest, db: Session = Depends(get_db)):
+    """
+    Confirm API key reset with verification code - generates new key.
+
+    **Step 2 of 2:** User provides email + 6-digit code, receives new API key.
+
+    Code must be used within 15 minutes of generation.
+    """
+    import secrets
+    import bcrypt
+    import logging
+    import redis
+
+    logger = logging.getLogger(__name__)
+
+    # Find user
+    user = db.query(User).filter(User.email == request.email).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Invalid email or code")
+
+    # Verify code from Redis
+    try:
+        redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+        stored_code = redis_client.get(f"reset:{user.user_id}")
+
+        if not stored_code:
+            raise HTTPException(
+                status_code=401,
+                detail="Code expired or invalid. Please request a new code."
+            )
+
+        if stored_code.decode() != request.code:
+            logger.warning(f"Invalid reset code attempt for {user.email}")
+            raise HTTPException(status_code=401, detail="Invalid code")
+
+    except redis.RedisError as e:
+        logger.error(f"Redis error during code verification: {e}")
+        raise HTTPException(status_code=500, detail="Verification service unavailable")
+
+    # Generate new API key
+    new_api_key = secrets.token_urlsafe(32)
+    api_key_hash = bcrypt.hashpw(
+        new_api_key.encode('utf-8'),
+        bcrypt.gensalt()
+    ).decode('utf-8')
+
+    # Update user's API key
+    user.api_key_hash = api_key_hash
+    db.commit()
+
+    # Delete used code
+    redis_client.delete(f"reset:{user.user_id}")
+
+    logger.info(f"API key reset completed for {user.email}")
+
+    return ConfirmKeyResetResponse(
+        user_id=str(user.user_id),
+        new_api_key=new_api_key,
+        message="New API key generated successfully. Save it now - it won't be shown again!"
+    )
+
+
+def _send_reset_email(to_email: str, name: str, code: str) -> bool:
+    """
+    Send password reset email with verification code.
+
+    Returns True if sent successfully, False otherwise.
+
+    **Production Setup:**
+    Set these environment variables:
+    - SMTP_HOST: smtp.gmail.com (or your provider)
+    - SMTP_PORT: 587
+    - SMTP_USER: your-email@gmail.com
+    - SMTP_PASSWORD: your-app-password
+    - FROM_EMAIL: noreply@yourlab.com
+    - FROM_NAME: ACMG Pipeline
+
+    Or use SendGrid/AWS SES:
+    - SENDGRID_API_KEY
+    - AWS_SES_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Check if email service is configured
+    smtp_host = os.getenv("SMTP_HOST")
+    sendgrid_key = os.getenv("SENDGRID_API_KEY")
+
+    if not smtp_host and not sendgrid_key:
+        logger.warning("Email service not configured - skipping email send")
+        return False
+
+    try:
+        if sendgrid_key:
+            # Use SendGrid
+            return _send_via_sendgrid(to_email, name, code)
+        elif smtp_host:
+            # Use SMTP
+            return _send_via_smtp(to_email, name, code)
+    except Exception as e:
+        logger.error(f"Failed to send reset email to {to_email}: {e}")
+        return False
+
+    return False
+
+
+def _send_via_smtp(to_email: str, name: str, code: str) -> bool:
+    """Send email via SMTP."""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    from_email = os.getenv("FROM_EMAIL", smtp_user)
+    from_name = os.getenv("FROM_NAME", "ACMG Pipeline")
+
+    msg = MIMEMultipart()
+    msg['From'] = f"{from_name} <{from_email}>"
+    msg['To'] = to_email
+    msg['Subject'] = "API Key Reset - Verification Code"
+
+    body = f"""
+Hi {name},
+
+You requested to reset your ACMG Pipeline API key.
+
+Your verification code is:
+
+    {code}
+
+This code will expire in 15 minutes.
+
+If you didn't request this reset, please ignore this email.
+
+---
+ACMG Variant Classification Pipeline
+"""
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.send_message(msg)
+
+    return True
+
+
+def _send_via_sendgrid(to_email: str, name: str, code: str) -> bool:
+    """Send email via SendGrid API."""
+    # Implement SendGrid sending here if using SendGrid
+    # pip install sendgrid
+    # from sendgrid import SendGridAPIClient
+    # from sendgrid.helpers.mail import Mail
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +741,246 @@ def serve_frontend():
             </body>
         </html>
         """)
+
+
+# ---------------------------------------------------------------------------
+# Admin Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/users", tags=["Admin"])
+def list_all_users(
+    limit: int = 100,
+    offset: int = 0,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    List all users with quota usage statistics.
+
+    **Admin only** - requires admin API key.
+
+    Returns user details including email, quotas, activity status.
+    """
+    users = db.query(User).offset(offset).limit(limit).all()
+    total_count = db.query(User).count()
+
+    return {
+        "users": [
+            {
+                "user_id": str(u.user_id),
+                "email": u.email,
+                "name": u.name,
+                "organisation": u.organisation,
+                "analyses_used": u.analyses_used,
+                "max_analyses": u.max_analyses,
+                "remaining": u.max_analyses - u.analyses_used,
+                "is_active": u.is_active,
+                "is_admin": u.is_admin,
+                "created_at": u.created_at.isoformat(),
+                "has_ncbi_key": bool(u.ncbi_api_key),
+            }
+            for u in users
+        ],
+        "total": total_count,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/admin/sessions", tags=["Admin"])
+def list_all_sessions(
+    status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    List all analysis sessions across all users.
+
+    **Admin only** - requires admin API key.
+
+    Optionally filter by status: queued, running, complete, failed.
+    """
+    query = db.query(DBSession).join(User)
+
+    if status:
+        query = query.filter(DBSession.status == status)
+
+    sessions = query.order_by(DBSession.created_at.desc()).offset(offset).limit(limit).all()
+    total_count = query.count()
+
+    return {
+        "sessions": [
+            {
+                "session_id": s.session_id,
+                "user_id": str(s.user_id),
+                "user_email": s.user.email,
+                "status": s.status,
+                "progress_pct": s.progress_pct,
+                "variant_count": s.variant_count,
+                "vcf_filename": s.vcf_filename,
+                "genome_build": s.genome_build,
+                "created_at": s.created_at.isoformat(),
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+                "error": s.error,
+            }
+            for s in sessions
+        ],
+        "total": total_count,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.post("/admin/users/{user_id}/quota", tags=["Admin"])
+def update_user_quota(
+    user_id: str,
+    new_quota: int,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Update a user's analysis quota.
+
+    **Admin only** - requires admin API key.
+
+    Set new_quota to a higher value to increase user's limit.
+    """
+    import uuid as uuid_lib
+
+    user = db.query(User).filter(User.user_id == uuid_lib.UUID(user_id)).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    old_quota = user.max_analyses
+    user.max_analyses = new_quota
+    db.commit()
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"Admin {admin.email} updated quota for {user.email}: {old_quota} → {new_quota}"
+    )
+
+    return {
+        "user_id": str(user.user_id),
+        "email": user.email,
+        "old_quota": old_quota,
+        "new_quota": new_quota,
+        "message": f"Quota updated from {old_quota} to {new_quota}",
+    }
+
+
+@app.post("/admin/users/{user_id}/deactivate", tags=["Admin"])
+def deactivate_user(
+    user_id: str,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Deactivate a user account (soft delete).
+
+    **Admin only** - requires admin API key.
+
+    User will no longer be able to use their API key.
+    """
+    import uuid as uuid_lib
+
+    user = db.query(User).filter(User.user_id == uuid_lib.UUID(user_id)).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_active = False
+    db.commit()
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Admin {admin.email} deactivated user {user.email}")
+
+    return {
+        "user_id": str(user.user_id),
+        "email": user.email,
+        "message": f"User {user.email} has been deactivated",
+    }
+
+
+@app.post("/admin/users/{user_id}/activate", tags=["Admin"])
+def activate_user(
+    user_id: str,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Reactivate a previously deactivated user account.
+
+    **Admin only** - requires admin API key.
+    """
+    import uuid as uuid_lib
+
+    user = db.query(User).filter(User.user_id == uuid_lib.UUID(user_id)).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_active = True
+    db.commit()
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Admin {admin.email} reactivated user {user.email}")
+
+    return {
+        "user_id": str(user.user_id),
+        "email": user.email,
+        "message": f"User {user.email} has been reactivated",
+    }
+
+
+@app.get("/admin/stats", tags=["Admin"])
+def get_system_stats(
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get system-wide statistics.
+
+    **Admin only** - requires admin API key.
+
+    Returns user counts, session counts, and analysis statistics.
+    """
+    from sqlalchemy import func
+
+    total_users = db.query(User).count()
+    active_users = db.query(User).filter(User.is_active == True).count()
+    total_sessions = db.query(DBSession).count()
+
+    sessions_by_status = db.query(
+        DBSession.status,
+        func.count(DBSession.session_id)
+    ).group_by(DBSession.status).all()
+
+    total_variants = db.query(func.sum(DBSession.variant_count)).filter(
+        DBSession.variant_count.isnot(None)
+    ).scalar() or 0
+
+    return {
+        "users": {
+            "total": total_users,
+            "active": active_users,
+            "inactive": total_users - active_users,
+        },
+        "sessions": {
+            "total": total_sessions,
+            "by_status": {status: count for status, count in sessions_by_status},
+        },
+        "variants": {
+            "total_classified": total_variants,
+        },
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------
