@@ -9,6 +9,7 @@ import os
 import json
 import uuid
 import asyncio
+import redis
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -349,7 +350,17 @@ def _send_via_sendgrid(to_email: str, name: str, code: str) -> bool:
 
 @app.post("/analyze", response_model=AnalyzeResponse, tags=["Analysis"])
 async def analyze_vcf(
-    vcf_file: UploadFile = File(..., description="VCF or VCF.gz file"),
+    # Proband files (required)
+    vcf_file: UploadFile = File(..., description="Proband VCF or VCF.gz file"),
+    proband_bam: Optional[UploadFile] = File(None, description="Optional proband BAM file for phasing"),
+
+    # Parent files (optional - enables trio mode)
+    parent1_vcf: Optional[UploadFile] = File(None, description="Mother's VCF file (trio mode)"),
+    parent2_vcf: Optional[UploadFile] = File(None, description="Father's VCF file (trio mode)"),
+    parent1_bam: Optional[UploadFile] = File(None, description="Mother's BAM file (for phasing)"),
+    parent2_bam: Optional[UploadFile] = File(None, description="Father's BAM file (for phasing)"),
+
+    # Analysis parameters
     genome_build: str = Form("GRCh38"),
     clinical_notes: str = Form(""),
     proband_sex: str = Form("unknown"),
@@ -359,25 +370,75 @@ async def analyze_vcf(
     db: Session = Depends(get_db)
 ):
     """
-    Submit a VCF file for ACMG variant classification analysis.
+    Submit VCF file(s) for ACMG variant classification analysis.
+
+    **Solo mode:** Submit only vcf_file (proband VCF)
+    **Trio mode:** Submit vcf_file + parent1_vcf + parent2_vcf
+
+    Trio mode enables:
+    - PS2/PM6 (de novo variant detection)
+    - PP1/BS2/BS4 (segregation analysis)
+    - PM3 (compound heterozygote detection - requires BAM files)
 
     Returns a session_id to track job progress via /status/{session_id}.
     """
     # Generate session ID
     session_id = f"session_{uuid.uuid4().hex[:12]}"
+    session_dir = UPLOAD_DIR / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save uploaded VCF
-    vcf_path = UPLOAD_DIR / session_id / vcf_file.filename
-    vcf_path.parent.mkdir(parents=True, exist_ok=True)
-
+    # Save proband VCF
+    vcf_path = session_dir / vcf_file.filename
     with open(vcf_path, "wb") as f:
         content = await vcf_file.read()
         f.write(content)
 
+    # Save parental VCFs if provided (trio mode)
+    parent1_vcf_path = None
+    parent2_vcf_path = None
+
+    if parent1_vcf:
+        parent1_vcf_path = session_dir / f"parent1_{parent1_vcf.filename}"
+        with open(parent1_vcf_path, "wb") as f:
+            content = await parent1_vcf.read()
+            f.write(content)
+
+    if parent2_vcf:
+        parent2_vcf_path = session_dir / f"parent2_{parent2_vcf.filename}"
+        with open(parent2_vcf_path, "wb") as f:
+            content = await parent2_vcf.read()
+            f.write(content)
+
+    # Detect trio mode
+    trio_mode = (parent1_vcf_path is not None and parent2_vcf_path is not None)
+
+    # Save BAM files if provided
+    proband_bam_path = None
+    parent1_bam_path = None
+    parent2_bam_path = None
+
+    if proband_bam:
+        proband_bam_path = session_dir / f"proband_{proband_bam.filename}"
+        with open(proband_bam_path, "wb") as f:
+            content = await proband_bam.read()
+            f.write(content)
+
+    if parent1_bam:
+        parent1_bam_path = session_dir / f"parent1_{parent1_bam.filename}"
+        with open(parent1_bam_path, "wb") as f:
+            content = await parent1_bam.read()
+            f.write(content)
+
+    if parent2_bam:
+        parent2_bam_path = session_dir / f"parent2_{parent2_bam.filename}"
+        with open(parent2_bam_path, "wb") as f:
+            content = await parent2_bam.read()
+            f.write(content)
+
     # Save case database if provided
     case_db_path = None
     if case_database_csv:
-        case_db_path = UPLOAD_DIR / session_id / "case_database.csv"
+        case_db_path = session_dir / "case_database.csv"
         with open(case_db_path, "wb") as f:
             content = await case_database_csv.read()
             f.write(content)
@@ -392,6 +453,12 @@ async def analyze_vcf(
         "proband_sex": proband_sex,
         "patient_hpo_terms": hpo_terms,
         "case_database_csv": str(case_db_path) if case_db_path else None,
+        # Trio mode parameters
+        "parent1_vcf_path": str(parent1_vcf_path) if parent1_vcf_path else None,
+        "parent2_vcf_path": str(parent2_vcf_path) if parent2_vcf_path else None,
+        "proband_bam_path": str(proband_bam_path) if proband_bam_path else None,
+        "parent1_bam_path": str(parent1_bam_path) if parent1_bam_path else None,
+        "parent2_bam_path": str(parent2_bam_path) if parent2_bam_path else None,
     }
 
     # Create session record in database
@@ -402,9 +469,17 @@ async def analyze_vcf(
         clinical_notes=clinical_notes,
         proband_sex=proband_sex,
         vcf_filename=vcf_file.filename,
+        # Trio mode tracking
+        trio_mode=trio_mode,
+        parent1_vcf_filename=parent1_vcf.filename if parent1_vcf else None,
+        parent2_vcf_filename=parent2_vcf.filename if parent2_vcf else None,
+        proband_bam_filename=proband_bam.filename if proband_bam else None,
+        parent1_bam_filename=parent1_bam.filename if parent1_bam else None,
+        parent2_bam_filename=parent2_bam.filename if parent2_bam else None,
+        # Status
         status="queued",
         progress_pct=0,
-        current_step="Queued for processing",
+        current_step="Queued for processing" + (" (trio mode)" if trio_mode else " (solo mode)"),
         params_json=params
     )
     db.add(session)
@@ -420,10 +495,11 @@ async def analyze_vcf(
         params=params
     )
 
+    mode_msg = "trio analysis" if trio_mode else "solo analysis"
     return AnalyzeResponse(
         session_id=session_id,
         status="queued",
-        message=f"Analysis queued successfully. Use session_id to check status."
+        message=f"Analysis queued successfully ({mode_msg}). Use session_id to check status."
     )
 
 

@@ -72,6 +72,20 @@ class Session(Base):
     clinical_notes = Column(Text)
     proband_sex = Column(String)
     vcf_filename = Column(String)
+
+    # Trio mode tracking
+    trio_mode = Column(Boolean, default=False)  # True if parental VCFs provided
+    parent1_vcf_filename = Column(String, nullable=True)  # Mother's VCF filename
+    parent2_vcf_filename = Column(String, nullable=True)  # Father's VCF filename
+    proband_bam_filename = Column(String, nullable=True)  # Proband BAM for phasing
+    parent1_bam_filename = Column(String, nullable=True)  # Mother's BAM for phasing
+    parent2_bam_filename = Column(String, nullable=True)  # Father's BAM for phasing
+
+    # Trio-specific results (for dashboard display)
+    denovo_count = Column(Integer, default=0)  # Number of de novo variants (PS2)
+    compound_het_count = Column(Integer, default=0)  # Number of compound het pairs (PM3)
+    segregation_count = Column(Integer, default=0)  # Number of variants with segregation evidence
+
     variant_count = Column(Integer)
     status = Column(String, default="queued", index=True)  # queued|running|complete|failed
     progress_pct = Column(Integer, default=0)

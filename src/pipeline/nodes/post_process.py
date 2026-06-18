@@ -44,7 +44,101 @@ try:
 except ImportError:
     CYVCF2_AVAILABLE = False
 
+try:
+    import pysam
+    PYSAM_AVAILABLE = True
+except ImportError:
+    PYSAM_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Parental genotype extraction (trio mode)
+# ---------------------------------------------------------------------------
+
+def _extract_parental_genotype(
+    vcf_path: str,
+    chrom: str,
+    pos: int,
+    ref: str,
+    alt: str
+) -> Optional[str]:
+    """
+    Extract genotype (GT field) from a parental VCF at a specific variant position.
+
+    Args:
+        vcf_path: Path to parent VCF file
+        chrom: Chromosome (e.g., "13" or "chr13")
+        pos: 1-based position
+        ref: Reference allele
+        alt: Alternate allele
+
+    Returns:
+        Genotype string: "0/0", "0/1", "1/1", "0|1", etc.
+        "0/0" if variant not found in parent VCF (assumes reference)
+        None if VCF cannot be read
+    """
+    if not PYSAM_AVAILABLE:
+        logger.warning("pysam not available - cannot extract parental genotypes")
+        return None
+
+    if not vcf_path or not Path(vcf_path).exists():
+        logger.warning(f"Parent VCF not found: {vcf_path}")
+        return None
+
+    try:
+        # Normalize chromosome name (strip "chr" prefix if present in query)
+        chrom_normalized = chrom.replace("chr", "")
+
+        vcf = pysam.VariantFile(vcf_path)
+
+        # Try both with and without "chr" prefix
+        for chrom_variant in [chrom, chrom_normalized, f"chr{chrom_normalized}"]:
+            try:
+                # Fetch region (pos-1 to pos for 0-based pysam)
+                for record in vcf.fetch(chrom_variant, pos-1, pos):
+                    # Check if this is the exact variant we're looking for
+                    if record.pos != pos:
+                        continue
+
+                    if record.ref != ref:
+                        continue
+
+                    # Check if alt allele matches
+                    if alt not in [str(a) for a in record.alts or []]:
+                        continue
+
+                    # Found matching variant - extract GT
+                    if len(record.samples) == 0:
+                        logger.warning(f"No samples in parent VCF at {chrom}:{pos}")
+                        return None
+
+                    sample = record.samples[0]  # Assume single-sample VCF
+                    gt = sample.get("GT")
+
+                    if gt is None:
+                        logger.warning(f"No GT field for variant {chrom}:{pos} in {vcf_path}")
+                        return "0/0"  # Missing GT → assume reference
+
+                    # Format genotype: (0, 1) → "0/1" or "0|1" based on phasing
+                    if sample.phased:
+                        return "|".join(str(allele) if allele is not None else "." for allele in gt)
+                    else:
+                        return "/".join(str(allele) if allele is not None else "." for allele in gt)
+
+            except Exception as e:
+                # Try next chromosome variant
+                continue
+
+        # Variant not found in parent VCF → assume homozygous reference
+        logger.debug(f"Variant {chrom}:{pos} not found in {Path(vcf_path).name} - assuming 0/0")
+        return "0/0"
+
+    except Exception as e:
+        logger.warning(f"Error extracting genotype from {vcf_path} at {chrom}:{pos}: {e}")
+        return None
+
 
 # ---------------------------------------------------------------------------
 # gnomAD population AF columns in VEP TSV output
@@ -714,6 +808,35 @@ def _parse_vep_row(
         else:
             logger.debug(f"VCF not found for zygosity extraction: {vcf_path}")
 
+    # Extract parental genotypes if trio mode
+    parent1_genotype = None
+    parent2_genotype = None
+
+    if base_state.get("trio_mode") and chrom and pos_int and ref and alt:
+        parent1_vcf = base_state.get("parent1_vcf_path")
+        parent2_vcf = base_state.get("parent2_vcf_path")
+
+        if parent1_vcf:
+            parent1_genotype = _extract_parental_genotype(
+                parent1_vcf, chrom, pos_int, ref, alt
+            )
+            if parent1_genotype:
+                logger.debug(f"[{session_id}] {variant_id} - Parent1 GT: {parent1_genotype}")
+
+        if parent2_vcf:
+            parent2_genotype = _extract_parental_genotype(
+                parent2_vcf, chrom, pos_int, ref, alt
+            )
+            if parent2_genotype:
+                logger.debug(f"[{session_id}] {variant_id} - Parent2 GT: {parent2_genotype}")
+
+        # Log trio status
+        if parent1_genotype and parent2_genotype:
+            logger.info(
+                f"[{session_id}] {variant_id} - Trio genotypes: "
+                f"Proband={zygosity or '?'}, Parent1={parent1_genotype}, Parent2={parent2_genotype}"
+            )
+
     # Build state — start from base and overlay parsed fields
     state = dict(base_state)   # shallow copy of base
     state.update({
@@ -728,6 +851,10 @@ def _parse_vep_row(
         "exon_number":      exon_num,
         "intron_number":    intron_num,
         "zygosity":         zygosity,  # het/hom/hemi from VCF GT field
+
+        # Trio mode - parental genotypes (extracted from parent VCFs)
+        "parent1_genotype": parent1_genotype,  # e.g., "0/0", "0/1", "1/1"
+        "parent2_genotype": parent2_genotype,  # e.g., "0/0", "0/1", "1/1"
 
         # Phase 2 — population frequency
         "max_gnomad_af":           max_af,

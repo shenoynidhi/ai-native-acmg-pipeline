@@ -53,6 +53,8 @@ class User(Base):
     analyses_used = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)  # Admin flag for privileged access
+    ncbi_api_key = Column(String, nullable=True)  # Optional user-provided NCBI API key
 
     # Relationships
     sessions = relationship("Session", back_populates="user")

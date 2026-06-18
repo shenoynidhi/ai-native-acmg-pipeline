@@ -465,6 +465,48 @@ def _parse_clinvar_stars(clnrevstat: str) -> int:
     return _CLNREVSTAT_STARS.get(key, 0)
 
 
+def _format_lof_status(lof_tag: Optional[str], lof_filter: Optional[str], lof_flags: Optional[str]) -> str:
+    """
+    Format human-readable LoF status for reports.
+
+    Args:
+        lof_tag: "HC" (high confidence) or "LC" (low confidence) or empty
+        lof_filter: Reason for not being HC (e.g., "SINGLE_EXON", "END_TRUNC")
+        lof_flags: Additional warnings (e.g., "PHYLOCSF_WEAK")
+
+    Returns:
+        Human-readable string for reports
+    """
+    if not lof_tag or lof_tag == "-":
+        return "Not predicted LoF"
+
+    if lof_tag == "HC":
+        if lof_flags:
+            # High confidence but with caveats
+            flag_text = lof_flags.replace("_", " ").lower()
+            return f"High confidence LoF (warning: {flag_text})"
+        return "High confidence LoF"
+
+    if lof_tag == "LC":
+        if lof_filter:
+            # Low confidence with reason
+            filter_map = {
+                "SINGLE_EXON": "single exon gene",
+                "END_TRUNC": "truncation in last exon",
+                "SMALL_INTRON": "small intron (<15bp)",
+                "NON_CAN_SPLICE": "non-canonical splice site",
+                "NON_CAN_SPLICE_SURR": "non-canonical surrounding splice sites",
+                "EXON_INTRON_UNDEF": "exon/intron boundary undefined",
+                "ANC_ALLELE": "ancestral allele discordance",
+            }
+            readable = filter_map.get(lof_filter, lof_filter.replace("_", " ").lower())
+            return f"Low confidence LoF ({readable})"
+        return "Low confidence LoF"
+
+    # Fallback
+    return f"LoF: {lof_tag}"
+
+
 def _max_gnomad_af(row: Dict, pop_cols: Dict) -> Tuple[float, Dict[str, float]]:
     """
     Extract max gnomAD AF and per-population AF dict from a VEP row.
@@ -619,7 +661,12 @@ def _parse_vep_row(
 
     # LOFTEE
     lof_tag     = _str(row.get("LoF", "") or "")
+    lof_filter  = _str(row.get("LoF_filter", "") or "")
+    lof_flags   = _str(row.get("LoF_flags", "") or "")
     is_loftee_hc = lof_tag == "HC"
+
+    # Format human-readable LoF status
+    lof_status = _format_lof_status(lof_tag, lof_filter, lof_flags)
 
     # In-silico votes
     dam_votes, ben_votes = _insilico_votes(row)
@@ -696,6 +743,9 @@ def _parse_vep_row(
 
         # Phase 4 — in-silico scores
         "is_loftee_hc":           is_loftee_hc,
+        "lof_filter":             lof_filter,
+        "lof_flags":              lof_flags,
+        "lof_status":             lof_status,
         "max_spliceai":           spliceai,
         "revel_score":            revel,
         "cadd_phred":             cadd,

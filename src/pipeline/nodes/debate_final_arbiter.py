@@ -107,7 +107,7 @@ def _query_acmg_guidelines_arbiter(
         return docs
 
     except Exception as e:
-        logger.warning(f" RAG query failed: {e}")
+        logger.warning(f"[final_arbiter] RAG query failed: {e}")
         return []
 
 
@@ -140,7 +140,11 @@ Your responsibilities:
    reclassify (e.g., "functional study demonstrating loss of enzymatic activity
    would add PS3 Moderate and upgrade to LP via LP2").
 5. Flag all unevaluated criteria (PP4/BP5 if no clinical history was provided).
-6. Your final classification must be reproducible — another reviewer reading your
+6. For trio mode variants with PM6 (assumed de novo): We already HAVE parental
+   genotypes showing the variant is absent in both parents. The recommended followup
+   should request "confirmation of parental identity via maternity/paternity testing"
+   to upgrade PM6 to PS2, NOT "obtain parental genotypes" (we have them).
+7. Your final classification must be reproducible — another reviewer reading your
    output should reach the same conclusion from the same evidence.
 
 ACMG GUIDELINE REFERENCE (retrieved for all criteria active in this debate):
@@ -271,7 +275,7 @@ def debate_final_arbiter_node(state: VariantState) -> dict:
     ACMG classification with full evidence summary.
     """
     variant_id = state.get("variant_id", "?")
-    logger.info(f" Processing {variant_id}")
+    logger.info(f"[final_arbiter] Processing {variant_id}")
 
     # Collect ALL active criteria for broadest RAG query
     fired_p  = list(state.get("all_criteria_pathogenic", {}).keys())

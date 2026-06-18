@@ -43,6 +43,7 @@ State fields WRITTEN:
 
 import json
 import logging
+from src.utils.logging_config import get_user_friendly_logger
 from typing import Optional
 
 import chromadb
@@ -52,7 +53,7 @@ from src.pipeline.state import VariantState
 from src.utils.llm_client import call_llm_json
 from src.config import CHROMADB_DIR
 
-logger = logging.getLogger(__name__)
+logger = get_user_friendly_logger('final_arbiter')
 
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
@@ -106,7 +107,7 @@ def _query_acmg_guidelines_arbiter(
         return docs
 
     except Exception as e:
-        logger.warning(f"RAG query failed: {e}")
+        logger.warning(f" RAG query failed: {e}")
         return []
 
 
@@ -155,7 +156,7 @@ Output format — respond with valid JSON only, no markdown:
   "recommended_followup": "specific recommended tests or data that would strengthen or change the classification",
   "reclassification_conditions": "for VUS: what specific evidence would reclassify this variant; for P/LP/B/LB: conditions under which reclassification should be triggered",
   "debate_notes": "1-3 sentences on how the two advocate arguments were weighed",
-  "unevaluated_criteria_report": ["list of criteria not evaluated due to missing input, e.g. PP4_not_evaluated_no_clinical_history"]
+  "unevaluated_criteria_report": ["list of criteria not evaluated due to missing input, e.g. PP4_not_evaluated_no_phenotype_match, BP5_not_evaluated_no_alternate_molecular_diagnosis"]
 }}"""
 
 
@@ -270,7 +271,7 @@ def debate_final_arbiter_node(state: VariantState) -> dict:
     ACMG classification with full evidence summary.
     """
     variant_id = state.get("variant_id", "?")
-    logger.info(f"Processing {variant_id}")
+    logger.info(f" Processing {variant_id}")
 
     # Collect ALL active criteria for broadest RAG query
     fired_p  = list(state.get("all_criteria_pathogenic", {}).keys())
