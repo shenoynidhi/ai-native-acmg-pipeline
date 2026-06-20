@@ -1,0 +1,88 @@
+# docker/Dockerfile.pipeline
+#
+# Main pipeline container: Python 3.11 + bcftools + samtools + whatshap
+# Does NOT include VEP — VEP runs in its own container (Dockerfile.vep)
+#
+# Build: docker build -f docker/Dockerfile.pipeline -t acmg-pipeline .
+# ---------------------------------------------------------------------------
+
+FROM python:3.11-slim-bookworm
+
+LABEL maintainer="acmg-pipeline"
+LABEL description="ACMG variant classification pipeline — Python + bioinformatics tools"
+
+# ---------------------------------------------------------------------------
+# System dependencies
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # bcftools / samtools build deps
+    libhts-dev \
+    bcftools \
+    samtools \
+    # General utilities
+    wget \
+    curl \
+    tabix \
+    bgzip \
+    # Compression
+    libbz2-dev \
+    liblzma-dev \
+    zlib1g-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# WhatsHap (phasing) — install via pip, cleaner than conda in Docker
+# ---------------------------------------------------------------------------
+RUN pip install --no-cache-dir whatshap==2.3
+
+# ---------------------------------------------------------------------------
+# Python dependencies
+# ---------------------------------------------------------------------------
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ---------------------------------------------------------------------------
+# Application source
+# ---------------------------------------------------------------------------
+COPY src/ ./src/
+COPY .env.docker .env
+
+# ---------------------------------------------------------------------------
+# Environment variables — all overridable at runtime via docker-compose
+# ---------------------------------------------------------------------------
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Paths inside container (volumes mounted at runtime)
+ENV VEP_DATA_DIR=/data/vep
+ENV DATABASE_DIR=/data/databases
+ENV CHROMADB_DIR=/data/chromadb
+ENV OUTPUT_DIR=/data/output
+ENV REFERENCE_DIR=/data/reference
+
+# Binaries (installed in this image via apt)
+ENV BCFTOOLS_BINARY=/usr/bin/bcftools
+ENV SAMTOOLS_BINARY=/usr/bin/samtools
+ENV WHATSHAP_BINARY=/usr/local/bin/whatshap
+
+# VEP binary path — points to vep container's shared volume
+# The vep container writes its binary location; we call it via subprocess
+# using the VEP_BINARY env var set in docker-compose.yml
+ENV VEP_BINARY=/opt/vep/src/ensembl-vep/vep
+ENV VEP_PERL=/usr/bin/perl
+
+# LLM — override in docker-compose or .env
+ENV LLM_BASE_URL=http://llm:8000/v1
+ENV LLM_MODEL=qwen2.5-14b
+ENV LLM_API_KEY=dummy
+
+# ---------------------------------------------------------------------------
+# Healthcheck
+# ---------------------------------------------------------------------------
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "from src.config import OUTPUT_DIR; print('OK')" || exit 1
+
+CMD ["python", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+

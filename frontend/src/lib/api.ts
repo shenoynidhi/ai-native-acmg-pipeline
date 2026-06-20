@@ -1,0 +1,24 @@
+import axios from 'axios';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+apiClient.interceptors.request.use((config) => {
+  const apiKey = localStorage.getItem('api_key');
+  if (apiKey) {
+    config.params = { ...config.params, api_key: apiKey };
+  }
+  return config;
+});
+
+export default apiClient;
+
+export const getApiKey = () => localStorage.getItem('api_key');
+export const setApiKey = (key: string) => localStorage.setItem('api_key', key);
+export const clearApiKey = () => localStorage.removeItem('api_key');

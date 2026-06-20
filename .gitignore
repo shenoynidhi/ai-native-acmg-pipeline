@@ -1,0 +1,10 @@
+.env
+data/output/
+data/chromadb/
+logs/
+*.log
+__pycache__/
+*.pyc
+data/reference/
+data/databases/
+.nfs*

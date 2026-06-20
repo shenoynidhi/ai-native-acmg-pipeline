@@ -1,0 +1,3 @@
+/* Pure CSS - NO TAILWIND */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: sans-serif; background: linear-gradient(135deg, #fffbeb, #d1fae5); min-height: 100vh; }

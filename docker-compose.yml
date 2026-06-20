@@ -1,0 +1,170 @@
+# docker-compose.yml
+#
+# Local development compose file.
+# Runs the full pipeline stack on your laptop with mock/real data.
+#
+# Usage:
+#   docker compose up --build          # start everything
+#   docker compose up pipeline         # start only pipeline + deps
+#   docker compose run pipeline pytest # run tests
+#
+# Environment:
+#   Copy .env.example to .env and fill in LLM_BASE_URL for your setup.
+# ---------------------------------------------------------------------------
+
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Shared volume definitions
+# On laptop:  bind mounts to local ./data/ directory
+# On AWS:     replace bind mounts with EBS-backed named volumes
+# ---------------------------------------------------------------------------
+volumes:
+  vep_data:      # VEP cache + plugin databases (~200 GB on AWS, empty locally)
+  databases:     # HPO, ClinGen, HGNC, gnomAD constraint (~500 MB)
+  chromadb:      # RAG vector store (~2 GB after indexing)
+  output:        # per-session analysis outputs
+  reference:     # GRCh38 FASTA + index (~3 GB)
+  redis_data:    # Celery broker persistence
+
+services:
+
+  # -------------------------------------------------------------------------
+  # Redis — Celery message broker + result backend
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # -------------------------------------------------------------------------
+  # VEP container — annotation sidecar
+  # The pipeline container calls VEP by running:
+  #   docker exec acmg-vep vep [args]
+  # or via a shared Unix socket (configured below).
+  #
+  # On laptop: VEP_DATA_DIR is empty → VEP will fail gracefully.
+  #            vep_runner_node detects this and uses fixture output.
+  # -------------------------------------------------------------------------
+  vep:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.vep
+    container_name: acmg-vep
+    restart: unless-stopped
+    volumes:
+      - vep_data:/data/vep                    # VEP cache + databases
+      - ./data/vep:/data/vep                  # local bind override for dev
+      - output:/data/output
+    environment:
+      VEP_DATA_DIR: /data/vep
+    # VEP container stays alive so pipeline can docker exec into it
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+  # -------------------------------------------------------------------------
+  # Pipeline worker — runs the LangGraph pipeline
+  # -------------------------------------------------------------------------
+  pipeline:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pipeline
+    container_name: acmg-pipeline
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data/vep:/data/vep                  # VEP databases (local bind)
+      - ./data/databases:/data/databases      # reference databases (local bind)
+      - ./data/chromadb:/data/chromadb        # RAG store (local bind)
+      - ./data/output:/data/output            # analysis outputs (local bind)
+      - ./data/reference:/data/reference      # GRCh38 FASTA (local bind)
+      - ./src:/app/src                        # live code reload during dev
+      - /var/run/docker.sock:/var/run/docker.sock  # allows calling vep container
+    environment:
+      # Paths inside container
+      VEP_DATA_DIR:    /data/vep
+      DATABASE_DIR:    /data/databases
+      CHROMADB_DIR:    /data/chromadb
+      OUTPUT_DIR:      /data/output
+      REFERENCE_DIR:   /data/reference
+      # Binaries (installed in Dockerfile.pipeline)
+      BCFTOOLS_BINARY: /usr/bin/bcftools
+      SAMTOOLS_BINARY: /usr/bin/samtools
+      WHATSHAP_BINARY: /usr/local/bin/whatshap
+      # VEP — called via docker exec into the vep container
+      VEP_CONTAINER:   acmg-vep
+      VEP_BINARY:      /opt/vep/src/ensembl-vep/vep
+      VEP_PERL:        /usr/bin/perl
+      # LLM — set in .env file
+      LLM_BASE_URL:    ${LLM_BASE_URL:-http://host.docker.internal:8000/v1}
+      LLM_MODEL:       ${LLM_MODEL:-qwen2.5-14b}
+      LLM_API_KEY:     ${LLM_API_KEY:-dummy}
+      # Celery
+      CELERY_BROKER_URL:  redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      PYTHONPATH:      /app
+      PYTHONUNBUFFERED: "1"
+    # Celery worker — picks up jobs from Redis queue
+    command: >
+      celery -A src.api.worker worker
+      --loglevel=info
+      --concurrency=2
+      --queues=acmg_jobs
+
+  # -------------------------------------------------------------------------
+  # API server — FastAPI endpoint
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: acmg-api
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/output:/data/output
+      - ./src:/app/src                        # live code reload
+    environment:
+      OUTPUT_DIR:           /data/output
+      CELERY_BROKER_URL:    redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      PYTHONPATH:           /app
+      PYTHONUNBUFFERED:     "1"
+      # API settings
+      API_SECRET_KEY:       ${API_SECRET_KEY:-dev-secret-change-in-production}
+      MAX_VCF_SIZE_MB:      ${MAX_VCF_SIZE_MB:-500}
+    command: >
+      uvicorn src.api.main:app
+      --host 0.0.0.0
+      --port 8080
+      --reload
+      --reload-dir /app/src
+
+  # -------------------------------------------------------------------------
+  # Flower — Celery job monitoring dashboard (dev only)
+  # Access at http://localhost:5555
+  # -------------------------------------------------------------------------
+  flower:
+    image: mher/flower:2.0
+    container_name: acmg-flower
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+    profiles:
+      - monitoring   # only starts with: docker compose --profile monitoring up
+

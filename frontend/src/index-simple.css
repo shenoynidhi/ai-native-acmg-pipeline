@@ -1,0 +1,39 @@
+/* Simple CSS - Cream & Mint Theme */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(to bottom right, #fffbeb, #d1fae5);
+  color: #1e3a2e;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Test - Show something */
+.test-visible {
+  padding: 40px;
+  text-align: center;
+  background: white;
+  margin: 20px;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.test-visible h1 {
+  color: #10b981;
+  font-size: 32px;
+  margin-bottom: 10px;
+}
+
+.test-visible p {
+  color: #6b7280;
+  font-size: 16px;
+}
