@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import apiClient, { getApiKey } from '@/lib/api';
 import type { Session, ProgressEvent } from '@/types';
@@ -24,7 +23,6 @@ export default function AnalysisDetail() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
 
   const { data: session, refetch } = useQuery<Session>({
     queryKey: ['session', sessionId],
@@ -32,8 +30,8 @@ export default function AnalysisDetail() {
       const response = await apiClient.get(`/status/${sessionId}`);
       return response.data;
     },
-    refetchInterval: (data) => {
-      return data?.status === 'running' || data?.status === 'queued' ? 2000 : false;
+    refetchInterval: (query) => {
+      return query.state.data?.status === 'running' || query.state.data?.status === 'queued' ? 2000 : false;
     },
   });
 
@@ -48,8 +46,6 @@ export default function AnalysisDetail() {
       `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/stream/${sessionId}?api_key=${apiKey}`
     );
 
-    setIsStreaming(true);
-
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -58,7 +54,6 @@ export default function AnalysisDetail() {
         if (data.stage === 'complete' || data.stage === 'failed') {
           refetch();
           eventSource.close();
-          setIsStreaming(false);
         }
       } catch (err) {
         console.error('SSE parse error:', err);
@@ -67,12 +62,10 @@ export default function AnalysisDetail() {
 
     eventSource.onerror = () => {
       eventSource.close();
-      setIsStreaming(false);
     };
 
     return () => {
       eventSource.close();
-      setIsStreaming(false);
     };
   }, [sessionId, session?.status, refetch]);
 
@@ -105,7 +98,7 @@ export default function AnalysisDetail() {
       queued: 'bg-yellow-500 hover:bg-yellow-600',
       failed: 'bg-red-500 hover:bg-red-600',
     };
-
+     
     return (
       <Badge variant={variants[status] || 'default'} className={colors[status]}>
         {status.toUpperCase()}

@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import apiClient from '@/lib/api';
 import type { QCResult } from '@/types';
 import { ArrowLeft, Download, CheckCircle, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
@@ -147,6 +146,10 @@ export default function QCResults() {
         </div>
       </div>
     );
+  }
+
+  if (!qcResult) {
+    return null;
   }
 
   const qcScoreColor = qcResult.qc_score >= 0.9 ? 'bg-green-500' : qcResult.qc_score >= 0.7 ? 'bg-yellow-500' : 'bg-red-500';
