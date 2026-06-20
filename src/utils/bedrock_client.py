@@ -28,10 +28,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # AWS Bedrock API Key (required)
-AWS_BEARER_TOKEN = os.getenv(
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "YOUR_BEDROCK_TOKEN_HERE="
-)
+AWS_BEARER_TOKEN = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
 
 # AWS Region
 BEDROCK_REGION = os.getenv("BEDROCK_REGION", "us-east-1")

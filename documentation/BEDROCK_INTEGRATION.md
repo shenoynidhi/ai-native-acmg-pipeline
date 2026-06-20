@@ -51,8 +51,8 @@
      # Use Bedrock
      LLM_PROVIDER=bedrock
      
-     # Your API Key (already set to your key)
-     AWS_BEARER_TOKEN_BEDROCK=YOUR_BEDROCK_TOKEN_HERE=
+     # Your API Key (set this to your actual Bedrock API key)
+     AWS_BEARER_TOKEN_BEDROCK=your-api-key-here
      
      # Default Model
      LLM_MODEL=nemotron-30b
