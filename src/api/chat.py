@@ -398,7 +398,7 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
         session_id = f"session_{uuid.uuid4().hex[:12]}"
 
         # Get VCF paths from form_data (uploaded earlier via /upload)
-        vcf_path = form_data.get("proband_vcf_path")
+        vcf_path = form_data.get("vcf_path")  # Fixed: use "vcf_path" not "proband_vcf_path"
         if not vcf_path:
             return "❌ Error: VCF file not found. Please upload again."
 
@@ -411,8 +411,8 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
 
         # Trio mode parameters
         if form_data.get("mode") == "trio":
-            params["parent1_vcf_path"] = form_data.get("parent1_vcf_path")
-            params["parent2_vcf_path"] = form_data.get("parent2_vcf_path")
+            params["parent1_vcf_path"] = form_data.get("parent1_vcf")  # Fixed key name
+            params["parent2_vcf_path"] = form_data.get("parent2_vcf")  # Fixed key name
             params["proband_bam_path"] = form_data.get("proband_bam_path")
             params["parent1_bam_path"] = form_data.get("parent1_bam_path")
             params["parent2_bam_path"] = form_data.get("parent2_bam_path")
