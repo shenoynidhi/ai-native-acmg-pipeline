@@ -39,8 +39,21 @@ export default function Register() {
   };
 
   const handleCopyAndLogin = () => {
-    navigator.clipboard.writeText(generatedKey);
-    setCopied(true);
+    // Fallback copy for HTTP (no HTTPS = no navigator.clipboard)
+    const textarea = document.createElement('textarea');
+    textarea.value = generatedKey;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      setCopied(true);
+    } catch (err) {
+      console.error('Copy failed:', err);
+    }
+    document.body.removeChild(textarea);
+
     setTimeout(() => {
       localStorage.setItem('api_key', generatedKey);
       navigate('/chat');
