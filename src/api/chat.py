@@ -308,8 +308,14 @@ def _process_user_input(
         form_data.clear()
         return "Sure! What type of analysis?\n\n1️⃣ **Solo** — Single patient VCF\n2️⃣ **Trio** — Proband + Mother + Father VCFs\n\nType `1` for Solo or `2` for Trio."
 
-    if user_lower in ["/status", "status"]:
-        return _get_status_summary(user)
+    if user_lower.startswith("/status"):
+        # Check if session_id provided
+        parts = user_input.strip().split()
+        if len(parts) >= 2:
+            session_id = parts[1]
+            return _get_detailed_status(session_id, user)
+        else:
+            return _get_status_summary(user)
 
     if user_lower in ["/history", "history"]:
         return _get_history_summary(user)
@@ -457,11 +463,12 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
 **Session ID:** `{session_id}`
 **Genome Build:** {params['genome_build']}
 
-Your analysis is now queued. Track progress with:
-- `/status {session_id}`
-- Real-time progress at: `/stream/{session_id}`
+Your analysis is now queued. Use the commands below to track progress:
 
-I'll notify you when it's complete! 🎉"""
+📊 `/status {session_id}` - Check current status
+🔍 View results at: [Dashboard](/analysis/{session_id})
+
+I'll check back and notify you when reports are ready for download! 🎉"""
 
     except Exception as e:
         logger.error(f"Analysis submission failed: {e}", exc_info=True)
@@ -536,6 +543,67 @@ def _help_message() -> str:
 What would you like to do?"""
 
 
+def _get_detailed_status(session_id: str, user: User) -> str:
+    """Get detailed status of a specific analysis with download links."""
+    from src.api.db import SessionLocal
+    import os
+
+    db = SessionLocal()
+    try:
+        session = db.query(DBSession).filter(
+            DBSession.session_id == session_id,
+            DBSession.user_id == user.user_id
+        ).first()
+
+        if not session:
+            return f"❌ **Session not found:** `{session_id}`\n\nCheck your session ID or use `/status` to see all analyses."
+
+        status_emoji = {
+            "queued": "⏳",
+            "running": "▶️",
+            "complete": "✅",
+            "failed": "❌"
+        }.get(session.status, "❓")
+
+        lines = [f"{status_emoji} **Analysis Status: {session.status.upper()}**\n"]
+        lines.append(f"**Session ID:** `{session_id}`")
+        lines.append(f"**Progress:** {session.progress_pct or 0}%")
+
+        if session.current_step:
+            lines.append(f"**Current Step:** {session.current_step}")
+
+        if session.variant_count:
+            lines.append(f"**Variants:** {session.variant_count}")
+
+        # Show download links if complete
+        if session.status == "complete" and session.report_paths:
+            lines.append("\n📥 **Download Reports:**\n")
+
+            api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+
+            if session.report_paths.get("xlsx"):
+                lines.append(f"📊 [Excel Report]({api_base}/download/{session_id}/xlsx)")
+
+            if session.report_paths.get("tsv"):
+                lines.append(f"📄 [TSV Report]({api_base}/download/{session_id}/tsv)")
+
+            if session.report_paths.get("html"):
+                lines.append(f"🌐 [HTML Report]({api_base}/download/{session_id}/html)")
+
+            lines.append(f"\n🔍 [View Full Results]({api_base.replace(':8000', ':3000')}/analysis/{session_id})")
+
+        elif session.status == "failed":
+            lines.append(f"\n❌ **Error:** {session.error or 'Unknown error'}")
+
+        elif session.status in ["queued", "running"]:
+            lines.append("\n⏳ Analysis in progress... Check back soon!")
+
+        return "\n".join(lines)
+
+    finally:
+        db.close()
+
+
 def _get_status_summary(user: User) -> str:
     """Get summary of user's recent analyses."""
     from src.api.db import SessionLocal
@@ -560,7 +628,7 @@ def _get_status_summary(user: User) -> str:
 
             lines.append(f"{status_emoji} `{s.session_id}` — {s.status} ({s.progress_pct or 0}%)")
 
-        lines.append("\n💡 **Tip:** Use `/status <session_id>` for detailed progress.")
+        lines.append("\n💡 **Tip:** Use `/status <session_id>` for detailed progress and download links.")
         return "\n".join(lines)
 
     finally:
