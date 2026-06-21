@@ -59,10 +59,10 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
-app.include_router(qc.router, prefix="/api/qc", tags=["QC Validation"])
-app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
-app.include_router(upload.router, prefix="/api", tags=["File Upload"])
+app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(qc.router, prefix="/qc", tags=["QC Validation"])
+app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+app.include_router(upload.router, prefix="", tags=["File Upload"])
 
 # Mount static files (CSS, JS)
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
