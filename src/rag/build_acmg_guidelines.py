@@ -29,9 +29,8 @@ logger = logging.getLogger(__name__)
 # Match your existing builder pattern
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
-# ── adjust to your actual CHROMADB_DIR ──────────────────────────────────────
-# In production import from src.config import CHROMADB_DIR
-CHROMADB_DIR = Path("data/chromadb")
+# Import from config to use production path
+from src.config import CHROMADB_DIR
 
 
 # ---------------------------------------------------------------------------
