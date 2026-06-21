@@ -457,6 +457,9 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
 
         mode_label = "Trio" if form_data.get("mode") == "trio" else "Solo"
 
+        import os
+        frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+
         return f"""✅ **Analysis submitted successfully!**
 
 **Mode:** {mode_label}
@@ -465,8 +468,8 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
 
 Your analysis is now queued. Use the commands below to track progress:
 
-📊 `/status {session_id}` - Check current status
-🔍 View results at: [Dashboard](/analysis/{session_id})
+📊 `/status {session_id}` - Check current status and get download links when complete
+🔍 [View results in Dashboard]({frontend_base}/analysis/{session_id})
 
 I'll check back and notify you when reports are ready for download! 🎉"""
 
@@ -580,6 +583,7 @@ def _get_detailed_status(session_id: str, user: User) -> str:
             lines.append("\n📥 **Download Reports:**\n")
 
             api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+            frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 
             if session.report_paths.get("xlsx"):
                 lines.append(f"📊 [Excel Report]({api_base}/download/{session_id}/xlsx)")
@@ -590,7 +594,7 @@ def _get_detailed_status(session_id: str, user: User) -> str:
             if session.report_paths.get("html"):
                 lines.append(f"🌐 [HTML Report]({api_base}/download/{session_id}/html)")
 
-            lines.append(f"\n🔍 [View Full Results]({api_base.replace(':8000', ':3000')}/analysis/{session_id})")
+            lines.append(f"\n🔍 [View Full Results]({frontend_base}/analysis/{session_id})")
 
         elif session.status == "failed":
             lines.append(f"\n❌ **Error:** {session.error or 'Unknown error'}")
