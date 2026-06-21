@@ -17,7 +17,7 @@ export default function QCResults() {
   const { data: qcResult, isLoading, refetch } = useQuery<QCResult>({
     queryKey: ['qc-result', sessionId],
     queryFn: async () => {
-      const response = await apiClient.get(`/api/qc/result/${sessionId}`);
+      const response = await apiClient.get(`/qc/result/${sessionId}`);
       return response.data;
     },
     retry: false,
@@ -39,7 +39,7 @@ export default function QCResults() {
 
   const handleExportQC = async () => {
     try {
-      const response = await apiClient.get(`/api/qc/export/${sessionId}`, {
+      const response = await apiClient.get(`/qc/export/${sessionId}`, {
         responseType: 'blob',
       });
 

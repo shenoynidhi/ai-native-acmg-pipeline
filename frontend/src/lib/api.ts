@@ -12,7 +12,7 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use((config) => {
   const apiKey = localStorage.getItem('api_key');
   if (apiKey) {
-    config.params = { ...config.params, api_key: apiKey };
+    config.headers['X-API-Key'] = apiKey;
   }
   return config;
 });

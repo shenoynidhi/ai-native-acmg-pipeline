@@ -14,11 +14,21 @@ Tables:
 import os
 from datetime import datetime
 from typing import Optional
+from pathlib import Path
 from sqlalchemy import create_engine, Column, String, Integer, Boolean, DateTime, JSON, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
+
+# Load environment variables from .env.aws if it exists
+try:
+    from dotenv import load_dotenv
+    env_file = Path(__file__).parent.parent.parent / ".env.aws"
+    if env_file.exists():
+        load_dotenv(env_file)
+except ImportError:
+    pass
 
 # Database URL from environment or default to local
 DATABASE_URL = os.getenv(
