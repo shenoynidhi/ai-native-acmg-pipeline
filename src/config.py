@@ -34,15 +34,15 @@ os.environ["CHROMA_TELEMETRY"] = "0"
 # In Docker:       /data/*  (mounted volumes)
 # On AWS:          /data/*  (EBS volume or S3 mount)
 
-DATABASE_DIR  = Path(os.getenv("DATABASE_DIR",  "/workspace/data/acmg-pipeline/data/databases"))
-CHROMADB_DIR  = Path(os.getenv("CHROMADB_DIR",  "/workspace/data/acmg-pipeline/data/chromadb"))
-OUTPUT_DIR    = Path(os.getenv("OUTPUT_DIR",    "/workspace/data/acmg-pipeline/data/output"))
-REFERENCE_DIR = Path(os.getenv("REFERENCE_DIR", "/workspace/data/acmg-pipeline/data/reference"))
+DATABASE_DIR  = Path(os.getenv("DATABASE_DIR",  "/home/ubuntu/ai-native-acmg-pipeline/data/databases"))
+CHROMADB_DIR  = Path(os.getenv("CHROMADB_DIR",  "/home/ubuntu/ai-native-acmg-pipeline/data/chromadb"))
+OUTPUT_DIR    = Path(os.getenv("OUTPUT_DIR",    "/home/ubuntu/ai-native-acmg-pipeline/data/output"))
+REFERENCE_DIR = Path(os.getenv("REFERENCE_DIR", "/home/ubuntu/ai-native-acmg-pipeline/data/reference"))
 
 # VEP cache + plugin data root
 # On pod:    /workspace/data/.vep
 # In Docker: /data/vep  (mounted from host)
-VEP_ROOT = Path(os.getenv("VEP_DATA_DIR", "/workspace/data/.vep"))
+VEP_ROOT = Path(os.getenv("VEP_DATA_DIR", "/mnt/ebs-databases/vep_databases"))
 
 # ---------------------------------------------------------------------------
 # Binary paths — overridable so Docker containers use their own installs
@@ -51,15 +51,15 @@ VEP_ROOT = Path(os.getenv("VEP_DATA_DIR", "/workspace/data/.vep"))
 # In Docker: /usr/bin/bcftools etc (installed in container image)
 
 VEP_BINARY      = Path(os.getenv("VEP_BINARY",
-    "/workspace/data/envs/vep/share/ensembl-vep-115.2-1/vep"))
+    "/home/ubuntu/miniconda3/envs/vep/share/ensembl-vep-115.2-1/vep"))
 VEP_PERL        = Path(os.getenv("VEP_PERL",
-    "/workspace/data/envs/vep/bin/perl"))
+    "/home/ubuntu/miniconda3/envs/vep/bin/perl"))
 BCFTOOLS_BINARY = Path(os.getenv("BCFTOOLS_BINARY",
-    "/workspace/data/envs/bcftools_env/bin/bcftools"))
+    "/home/ubuntu/miniconda3/envs/bcftools_env/bin/bcftools"))
 SAMTOOLS_BINARY = Path(os.getenv("SAMTOOLS_BINARY",
-    "/workspace/data/envs/bcftools_env/bin/samtools"))
+    "/home/ubuntu/miniconda3/envs/bcftools_env/bin/samtools"))
 WHATSHAP_BINARY = Path(os.getenv("WHATSHAP_BINARY",
-    "/workspace/data/envs/whatshap_env/bin/whatshap"))
+    "/home/ubuntu/miniconda3/envs/whatshap_env/bin/whatshap"))
 
 # ---------------------------------------------------------------------------
 # vLLM / LLM settings
@@ -67,7 +67,6 @@ WHATSHAP_BINARY = Path(os.getenv("WHATSHAP_BINARY",
 # In Docker: set LLM_BASE_URL in docker-compose.yml or .env
 # On AWS:    set LLM_BASE_URL to SageMaker endpoint or hosted vLLM instance
 # ---------------------------------------------------------------------------
-LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "bedrock")  # "bedrock" or "vllm"
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://172.29.127.185:8000/v1")
 LLM_MODEL:    str = os.getenv("LLM_MODEL",    "qwen2.5-14b")
 LLM_API_KEY:  str = os.getenv("LLM_API_KEY",  "dummy")
@@ -413,4 +412,3 @@ REPORT_CONFIG = ReportConfig(
     pipeline_version = "1.0",
     disclaimer = os.getenv("REPORT_DISCLAIMER", "This report is intended for clinical research use only. Variant classifications should be interpreted by a qualified clinical geneticist in the context of the patient's full clinical presentation."),
 )
-
