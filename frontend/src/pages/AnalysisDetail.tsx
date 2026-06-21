@@ -168,18 +168,18 @@ export default function AnalysisDetail() {
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <Button variant="ghost" onClick={() => navigate('/dashboard')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
+              <ArrowLeft className="h-4 w-4" />
+              <span className="mobile-hide-text ml-2">Back</span>
             </Button>
-            <div className="flex-1">
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Analysis Details</h1>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">Analysis Details</h1>
                 {getStatusIcon(session.status)}
                 {getStatusBadge(session.status)}
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 truncate">
                 Session ID: {sessionId}
               </p>
             </div>
@@ -314,7 +314,7 @@ export default function AnalysisDetail() {
               <CardTitle>Download Results</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex flex-wrap gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Button onClick={() => handleDownload('xlsx')}>
                   <Download className="h-4 w-4 mr-2" />
                   Download XLSX

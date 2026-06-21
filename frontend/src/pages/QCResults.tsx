@@ -159,14 +159,14 @@ export default function QCResults() {
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <Button variant="ghost" onClick={() => navigate(`/analysis/${sessionId}`)}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Analysis
+              <ArrowLeft className="h-4 w-4" />
+              <span className="mobile-hide-text ml-2">Back to Analysis</span>
             </Button>
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">QC Validation Results</h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Quality control report for {sessionId}</p>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">QC Validation Results</h1>
+              <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 truncate">Quality control report for {sessionId}</p>
             </div>
           </div>
         </div>
@@ -204,7 +204,7 @@ export default function QCResults() {
             </div>
 
             {/* Metadata */}
-            <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t">
               <div>
                 <p className="text-sm text-muted-foreground">Analysis Mode</p>
                 <p className="font-medium">{qcResult.analysis_mode.toUpperCase()}</p>
@@ -273,7 +273,7 @@ export default function QCResults() {
             <CardTitle>Actions</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Button onClick={handleExportQC}>
                 <Download className="h-4 w-4 mr-2" />
                 Export QC Report (CSV)

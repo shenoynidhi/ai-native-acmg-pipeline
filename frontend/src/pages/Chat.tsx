@@ -146,8 +146,8 @@ export default function ChatPage() {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Top Header */}
-      <header style={{ background: 'white', borderBottom: '1px solid #d1fae5', padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <header className="chat-header" style={{ background: 'white', borderBottom: '1px solid #d1fae5', padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ width: '40px', height: '40px', background: 'linear-gradient(135deg, #10b981 0%, #14b8a6 100%)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>
               <Bot size={24} color="white" strokeWidth={2.5} />
@@ -162,7 +162,7 @@ export default function ChatPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button onClick={() => navigate('/dashboard')} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', background: 'transparent', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', color: '#374151' }}>
               <BarChart size={16} />
-              <span>Dashboard</span>
+              <span className="mobile-hide-text">Dashboard</span>
             </button>
             <button onClick={() => navigate('/settings')} style={{ padding: '8px', background: 'transparent', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#374151' }}>
               <Settings size={16} />
@@ -176,7 +176,7 @@ export default function ChatPage() {
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Sidebar - Chat List */}
-        <div style={{ width: '320px', background: 'white', borderRight: '1px solid #d1fae5', display: 'flex', flexDirection: 'column', boxShadow: '1px 0 3px rgba(0,0,0,0.05)' }}>
+        <div className="chat-sidebar" style={{ width: '320px', background: 'white', borderRight: '1px solid #d1fae5', display: 'flex', flexDirection: 'column', boxShadow: '1px 0 3px rgba(0,0,0,0.05)' }}>
           {/* New Chat Button */}
           <div style={{ padding: '16px' }}>
             <button
@@ -283,10 +283,10 @@ export default function ChatPage() {
         </div>
 
         {/* Main Chat Area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div className="chat-main" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {!selectedChatId || !activeChat ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ textAlign: 'center', maxWidth: '600px', padding: '20px' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+              <div style={{ textAlign: 'center', maxWidth: '600px' }}>
                 <div style={{ width: '80px', height: '80px', background: 'linear-gradient(135deg, #10b981 0%, #14b8a6 100%)', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 8px 16px rgba(16, 185, 129, 0.3)' }}>
                   <Bot size={40} color="white" strokeWidth={2.5} />
                 </div>
@@ -308,7 +308,7 @@ export default function ChatPage() {
           ) : (
             <>
               {/* Messages Area */}
-              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+              <div ref={scrollRef} className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
                 <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
                   {chatLoading ? (
                     <div style={{ textAlign: 'center', paddingTop: '32px' }}>
@@ -332,7 +332,7 @@ export default function ChatPage() {
                             <Bot size={20} color="white" />
                           </div>
                         )}
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '70%' }}>
+                        <div className="chat-message-bubble" style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '70%' }}>
                           <div
                             style={{
                               borderRadius: '16px',
@@ -404,7 +404,7 @@ export default function ChatPage() {
               </div>
 
               {/* Input Area */}
-              <div style={{ borderTop: '1px solid #d1fae5', background: 'white', padding: '16px', boxShadow: '0 -1px 3px rgba(0,0,0,0.05)' }}>
+              <div className="chat-input-area" style={{ borderTop: '1px solid #d1fae5', background: 'white', padding: '16px', boxShadow: '0 -1px 3px rgba(0,0,0,0.05)' }}>
                 <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
                   {uploadingFile && (
                     <div style={{ marginBottom: '12px', padding: '12px', background: '#d1fae5', border: '1px solid #10b981', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -412,7 +412,7 @@ export default function ChatPage() {
                       <span style={{ fontSize: '14px', color: '#065f46' }}>Uploading and analyzing file...</span>
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'nowrap' }}>
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -438,7 +438,7 @@ export default function ChatPage() {
                         }
                       }}
                       disabled={sendMessageMutation.isPending}
-                      style={{ flex: 1, padding: '12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', resize: 'none', minHeight: '60px', maxHeight: '200px', fontFamily: 'inherit' }}
+                      style={{ flex: 1, minWidth: '0', padding: '12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', resize: 'none', minHeight: '60px', maxHeight: '200px', fontFamily: 'inherit' }}
                       rows={2}
                     />
                     <button

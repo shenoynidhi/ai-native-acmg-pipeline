@@ -95,19 +95,19 @@ export default function Dashboard() {
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">ACMG Pipeline</h1>
               <p className="text-sm text-gray-500 dark:text-gray-400">Variant Classification Dashboard</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <Button variant="outline" onClick={() => navigate('/settings')}>
-                <Settings className="h-4 w-4 mr-2" />
-                Settings
+                <Settings className="h-4 w-4" />
+                <span className="mobile-hide-text ml-2">Settings</span>
               </Button>
               <Button variant="outline" onClick={handleLogout}>
-                <LogOut className="h-4 w-4 mr-2" />
-                Logout
+                <LogOut className="h-4 w-4" />
+                <span className="mobile-hide-text ml-2">Logout</span>
               </Button>
             </div>
           </div>
@@ -263,12 +263,12 @@ export default function Dashboard() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Session ID</TableHead>
-                      <TableHead>Patient ID</TableHead>
+                      <TableHead className="mobile-hide">Patient ID</TableHead>
                       <TableHead>VCF File</TableHead>
-                      <TableHead>Mode</TableHead>
+                      <TableHead className="mobile-hide">Mode</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Variants</TableHead>
-                      <TableHead>Created</TableHead>
+                      <TableHead className="mobile-hide">Variants</TableHead>
+                      <TableHead className="mobile-hide">Created</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -278,17 +278,17 @@ export default function Dashboard() {
                         <TableCell className="font-mono text-xs">
                           {session.session_id.slice(0, 8)}...
                         </TableCell>
-                        <TableCell>{session.patient_id || '-'}</TableCell>
+                        <TableCell className="mobile-hide">{session.patient_id || '-'}</TableCell>
                         <TableCell className="max-w-[200px] truncate">
                           {session.vcf_filename || '-'}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="mobile-hide">
                           <Badge variant="outline">
                             {session.analysis_mode.toUpperCase()}
                           </Badge>
                         </TableCell>
                         <TableCell>{getStatusBadge(session.status)}</TableCell>
-                        <TableCell>
+                        <TableCell className="mobile-hide">
                           {session.variant_count ? (
                             <div className="flex flex-wrap gap-1">
                               {session.classifications && (
@@ -309,7 +309,7 @@ export default function Dashboard() {
                             '-'
                           )}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="mobile-hide text-xs text-muted-foreground">
                           {formatDate(session.created_at)}
                         </TableCell>
                         <TableCell>

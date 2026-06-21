@@ -477,13 +477,93 @@ header {
    Responsive Utilities
    ======================================================================== */
 
+/* Mobile-first responsive breakpoints */
 @media (max-width: 768px) {
+  /* Container adjustments */
   .container {
-    padding: 0 0.5rem;
+    padding: 0 0.75rem;
   }
 
-  .max-w-4xl {
+  .max-w-4xl,
+  .max-w-3xl {
     max-width: 100%;
+  }
+
+  /* Header adjustments */
+  header h1 {
+    font-size: 1.25rem;
+  }
+
+  header p {
+    font-size: 0.75rem;
+  }
+
+  /* Card padding reduction */
+  .card-header,
+  .card-content {
+    padding: 1rem;
+  }
+
+  /* Button adjustments */
+  button,
+  .button {
+    padding: 0.5rem 0.875rem;
+    font-size: 0.8125rem;
+  }
+
+  /* Table responsive */
+  table {
+    font-size: 0.8125rem;
+  }
+
+  th,
+  td {
+    padding: 0.5rem;
+  }
+
+  /* Hide less important table columns on mobile */
+  .mobile-hide {
+    display: none;
+  }
+
+  /* Stack flex items */
+  .md\:flex-row {
+    flex-direction: column;
+  }
+
+  /* Full width on mobile */
+  .md\:w-auto {
+    width: 100%;
+  }
+
+  /* Smaller gap on mobile */
+  .gap-6 {
+    gap: 1rem;
+  }
+
+  /* Input adjustments */
+  input,
+  textarea,
+  select {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+}
+
+/* Tablet breakpoint */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .container {
+    padding: 0 1rem;
+  }
+
+  .lg\:grid-cols-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Desktop breakpoint */
+@media (min-width: 1025px) {
+  .container {
+    max-width: 1280px;
   }
 }
 
@@ -517,4 +597,115 @@ select {
   background-repeat: no-repeat;
   background-size: 1.5em 1.5em;
   padding-right: 2.5rem;
+}
+
+/* ========================================================================
+   Chat Page Responsive Styles
+   ======================================================================== */
+
+/* Chat sidebar */
+.chat-sidebar {
+  width: 320px;
+  background: white;
+  border-right: 1px solid #d1fae5;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 1px 0 3px rgba(0,0,0,0.05);
+}
+
+/* Chat main area */
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Chat messages container */
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.chat-message-bubble {
+  max-width: 70%;
+}
+
+/* Responsive chat layout */
+@media (max-width: 768px) {
+  /* Hide sidebar by default on mobile */
+  .chat-sidebar {
+    position: fixed;
+    left: -320px;
+    top: 0;
+    bottom: 0;
+    z-index: 40;
+    transition: left 0.3s;
+  }
+
+  .chat-sidebar.open {
+    left: 0;
+  }
+
+  /* Show overlay when sidebar is open */
+  .chat-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 30;
+  }
+
+  .chat-overlay.open {
+    display: block;
+  }
+
+  /* Full width chat on mobile */
+  .chat-main {
+    width: 100%;
+  }
+
+  /* Smaller message bubbles */
+  .chat-message-bubble {
+    max-width: 85%;
+  }
+
+  /* Reduce padding */
+  .chat-messages {
+    padding: 16px;
+  }
+
+  /* Adjust input area */
+  .chat-input-area {
+    padding: 12px !important;
+  }
+
+  /* Mobile header adjustments */
+  .chat-header {
+    padding: 8px 12px !important;
+  }
+
+  .chat-header h1 {
+    font-size: 16px !important;
+  }
+
+  .chat-header p {
+    display: none;
+  }
+
+  /* Button text hidden on mobile */
+  .mobile-hide-text {
+    display: none;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  /* Narrower sidebar on tablet */
+  .chat-sidebar {
+    width: 280px;
+  }
+
+  .chat-message-bubble {
+    max-width: 75%;
+  }
 }

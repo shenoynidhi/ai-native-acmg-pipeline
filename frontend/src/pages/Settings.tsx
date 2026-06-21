@@ -67,14 +67,14 @@ export default function Settings() {
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <Button variant="ghost" onClick={() => navigate('/dashboard')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
+              <ArrowLeft className="h-4 w-4" />
+              <span className="mobile-hide-text ml-2">Back to Dashboard</span>
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Manage your account and preferences</p>
+              <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
+              <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400">Manage your account and preferences</p>
             </div>
           </div>
         </div>
