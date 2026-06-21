@@ -358,7 +358,8 @@ def submit_analysis(
     """
     task = analyze_variant_task.apply_async(
         args=[session_id, vcf_path, params],
-        task_id=session_id  # Use session_id as task_id for easy lookup
+        task_id=session_id,  # Use session_id as task_id for easy lookup
+        queue='acmg_jobs'  # Send to the correct queue that worker is listening on
     )
     return task.id
 
