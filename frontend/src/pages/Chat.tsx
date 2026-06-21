@@ -76,7 +76,7 @@ export default function ChatPage() {
   // Create new chat mutation
   const createChatMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiClient.post('/chat/new');
+      const response = await apiClient.post('/chat/new', { title: 'New Chat' });
       return response.data;
     },
     onSuccess: (data) => {
