@@ -43,7 +43,7 @@ export default function AnalysisDetail() {
     if (!apiKey) return;
 
     const eventSource = new EventSource(
-      `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/stream/${sessionId}?api_key=${apiKey}`
+      `${import.meta.env.VITE_API_BASE_URL || '/api'}/stream/${sessionId}?api_key=${apiKey}`
     );
 
     eventSource.onmessage = (event) => {
