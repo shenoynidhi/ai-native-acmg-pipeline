@@ -97,8 +97,10 @@ class ChatStore:
                     chat = json.load(f)
                     if chat.get("user_id") == str(user_id):
                         # Return summary only (exclude messages)
+                        chat_id = chat.get("chat_id") or chat.get("id")
                         chats.append({
-                            "id": chat["id"],
+                            "chat_id": chat_id,
+                            "id": chat_id,
                             "title": chat["title"],
                             "created_at": chat["created_at"],
                             "updated_at": chat["updated_at"],
@@ -176,6 +178,7 @@ def create_chat(
     now = datetime.now(timezone.utc).isoformat()
 
     chat = {
+        "chat_id": chat_id,
         "id": chat_id,
         "user_id": str(user.user_id),
         "title": req.title,
