@@ -67,8 +67,8 @@ export default function Analyze() {
       if (clinicalNotes) formData.append('clinical_notes', clinicalNotes);
 
       if (mode === 'trio') {
-        if (fatherVcf) formData.append('father_vcf', fatherVcf);
-        if (motherVcf) formData.append('mother_vcf', motherVcf);
+        if (fatherVcf) formData.append('parent1_vcf', fatherVcf);
+        if (motherVcf) formData.append('parent2_vcf', motherVcf);
         formData.append('proband_sex', probandSex);
       }
 

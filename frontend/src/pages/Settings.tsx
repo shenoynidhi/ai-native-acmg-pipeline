@@ -15,11 +15,17 @@ export default function Settings() {
   const [error, setError] = useState('');
   const [showNewKey, setShowNewKey] = useState(false);
   const [newApiKey, setNewApiKey] = useState('');
+  const [email, setEmail] = useState('');
 
   const currentApiKey = getApiKey() || '';
   const maskedKey = currentApiKey ? `${currentApiKey.slice(0, 8)}${'*'.repeat(32)}` : '';
 
   const handleRegenerateKey = async () => {
+    if (!email) {
+      setError('Please enter your email address');
+      return;
+    }
+
     if (!confirm('Are you sure you want to regenerate your API key? Your current key will be invalidated.')) {
       return;
     }
@@ -29,8 +35,8 @@ export default function Settings() {
     setMessage('');
 
     try {
-      const response = await apiClient.post('/regenerate-key');
-      const apiKey = response.data.api_key;
+      const response = await apiClient.post('/regenerate-key', { email });
+      const apiKey = response.data.new_api_key;
 
       setNewApiKey(apiKey);
       setShowNewKey(true);
@@ -142,27 +148,38 @@ export default function Settings() {
               />
             </div>
 
-            <div className="flex items-center justify-between pt-4">
+            <div className="space-y-4 pt-4 border-t">
               <div>
-                <p className="text-sm font-medium">Regenerate API Key</p>
-                <p className="text-xs text-muted-foreground">
-                  Create a new key if your current key is compromised
+                <p className="text-sm font-medium mb-4">Regenerate API Key</p>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Enter your email to regenerate your API key. Your current key will be invalidated.
                 </p>
+                <div className="space-y-2 mb-4">
+                  <Label htmlFor="email">Email Address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="your@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={loading}
+                  />
+                </div>
+                <Button
+                  variant="destructive"
+                  onClick={handleRegenerateKey}
+                  disabled={loading || !email}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Regenerating...
+                    </>
+                  ) : (
+                    'Regenerate Key'
+                  )}
+                </Button>
               </div>
-              <Button
-                variant="destructive"
-                onClick={handleRegenerateKey}
-                disabled={loading}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Regenerating...
-                  </>
-                ) : (
-                  'Regenerate Key'
-                )}
-              </Button>
             </div>
           </CardContent>
         </Card>

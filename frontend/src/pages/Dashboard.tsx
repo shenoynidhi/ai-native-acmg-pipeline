@@ -33,7 +33,7 @@ export default function Dashboard() {
       if (searchTerm) params.search = searchTerm;
 
       const response = await apiClient.get('/dashboard/analyses', { params });
-      return response.data.analyses || [];
+      return response.data.sessions || [];
     },
   });
 

@@ -10,7 +10,7 @@ export default function Register() {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    organization: '',
+    organisation: '',
   });
   const [generatedKey, setGeneratedKey] = useState('');
   const [error, setError] = useState('');
@@ -146,12 +146,12 @@ export default function Register() {
           </div>
 
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', marginBottom: '6px', color: '#1f2937' }}>Organization (Optional)</label>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', marginBottom: '6px', color: '#1f2937' }}>Organisation (Optional)</label>
             <input
               type="text"
-              placeholder="Your Organization"
-              value={formData.organization}
-              onChange={(e) => setFormData({ ...formData, organization: e.target.value })}
+              placeholder="Your Organisation"
+              value={formData.organisation}
+              onChange={(e) => setFormData({ ...formData, organisation: e.target.value })}
               disabled={loading}
               style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px' }}
             />

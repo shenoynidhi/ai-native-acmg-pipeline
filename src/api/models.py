@@ -34,7 +34,7 @@ class RegisterResponse(BaseModel):
 
 class RegenerateKeyRequest(BaseModel):
     """Request to regenerate API key for a user who lost theirs."""
-    email: EmailStr
+    email: Optional[EmailStr] = None
 
 
 class RegenerateKeyResponse(BaseModel):
