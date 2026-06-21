@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import apiClient from '../lib/api';
+import type { Chat, ChatMessage } from '../types';
 import {
   MessageSquare,
   Send,
@@ -18,25 +19,6 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-  file_info?: {
-    filename: string;
-    file_type: string;
-  };
-}
-
-interface Chat {
-  chat_id: string;
-  title: string;
-  messages: ChatMessage[];
-  updated_at: string;
-}
-
 export default function ChatPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -46,13 +28,6 @@ export default function ChatPage() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
-
-  const apiKey = localStorage.getItem('api_key');
-
-  const apiClient = axios.create({
-    baseURL: API_BASE_URL,
-    headers: { 'X-API-Key': apiKey || '' },
-  });
 
   // Fetch all chats
   const { data: chats, isLoading: chatsLoading } = useQuery<Chat[]>({
@@ -90,7 +65,7 @@ export default function ChatPage() {
     mutationFn: async (message: string) => {
       const response = await apiClient.post('/chat/send', {
         chat_id: selectedChatId,
-        message,
+        content: message,
       });
       return response.data;
     },
