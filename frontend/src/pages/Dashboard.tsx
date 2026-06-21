@@ -20,7 +20,7 @@ export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ['dashboard-stats'],
     queryFn: async () => {
-      const response = await apiClient.get('/api/dashboard/stats');
+      const response = await apiClient.get('/dashboard/stats');
       return response.data;
     },
   });
@@ -32,7 +32,7 @@ export default function Dashboard() {
       if (statusFilter !== 'all') params.status = statusFilter;
       if (searchTerm) params.search = searchTerm;
 
-      const response = await apiClient.get('/api/dashboard/analyses', { params });
+      const response = await apiClient.get('/dashboard/analyses', { params });
       return response.data.analyses || [];
     },
   });

@@ -58,7 +58,7 @@ export default function ChatPage() {
   const { data: chats, isLoading: chatsLoading } = useQuery<Chat[]>({
     queryKey: ['chats'],
     queryFn: async () => {
-      const response = await apiClient.get('/api/chat/');
+      const response = await apiClient.get('/chat/');
       return response.data.chats || [];
     },
   });
@@ -67,7 +67,7 @@ export default function ChatPage() {
   const { data: activeChat, isLoading: chatLoading } = useQuery<Chat>({
     queryKey: ['chat', selectedChatId],
     queryFn: async () => {
-      const response = await apiClient.get(`/api/chat/${selectedChatId}`);
+      const response = await apiClient.get(`/chat/${selectedChatId}`);
       return response.data;
     },
     enabled: !!selectedChatId,
@@ -76,7 +76,7 @@ export default function ChatPage() {
   // Create new chat mutation
   const createChatMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiClient.post('/api/chat/new');
+      const response = await apiClient.post('/chat/new');
       return response.data;
     },
     onSuccess: (data) => {
@@ -88,7 +88,7 @@ export default function ChatPage() {
   // Send message mutation
   const sendMessageMutation = useMutation({
     mutationFn: async (message: string) => {
-      const response = await apiClient.post('/api/chat/send', {
+      const response = await apiClient.post('/chat/send', {
         chat_id: selectedChatId,
         message,
       });
@@ -103,7 +103,7 @@ export default function ChatPage() {
   // Delete chat mutation
   const deleteChatMutation = useMutation({
     mutationFn: async (chatId: string) => {
-      await apiClient.delete(`/api/chat/${chatId}`);
+      await apiClient.delete(`/chat/${chatId}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
@@ -140,7 +140,7 @@ export default function ChatPage() {
       formData.append('chat_id', selectedChatId);
       formData.append('file', file);
 
-      await apiClient.post('/api/upload', formData, {
+      await apiClient.post('/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 

@@ -28,7 +28,7 @@ export default function QCResults() {
 
     setValidating(true);
     try {
-      await apiClient.post('/api/qc/validate', { session_id: sessionId });
+      await apiClient.post('/qc/validate', { session_id: sessionId });
       await refetch();
     } catch (err) {
       console.error('QC validation failed:', err);
