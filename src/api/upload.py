@@ -64,8 +64,8 @@ async def upload_file_to_chat(
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    # Verify ownership
-    if chat["user_email"] != user.email:
+    # Verify ownership (chat stores user_id, not user_email)
+    if chat.get("user_id") != str(user.user_id):
         raise HTTPException(status_code=403, detail="Not your chat")
 
     # Create uploads directory for this chat
@@ -74,7 +74,14 @@ async def upload_file_to_chat(
 
     # Save file
     file_id = str(uuid.uuid4())
-    ext = Path(file.filename).suffix.lower()
+    filename_lower = file.filename.lower()
+
+    # Determine file extension (handle .vcf.gz)
+    if filename_lower.endswith('.vcf.gz'):
+        ext = '.vcf.gz'
+    else:
+        ext = Path(file.filename).suffix.lower()
+
     filepath = upload_dir / f"{file_id}{ext}"
 
     with open(filepath, "wb") as f:
@@ -99,7 +106,7 @@ async def upload_file_to_chat(
                 max_tokens=500
             )
 
-        elif ext == ".vcf":
+        elif ext in [".vcf", ".vcf.gz"]:
             # For VCF, just note that it's uploaded - actual analysis happens via /analyze
             summary = f"✅ **VCF file uploaded:** `{file.filename}`\n\nYou can now use `/analyze` to start variant classification."
 
