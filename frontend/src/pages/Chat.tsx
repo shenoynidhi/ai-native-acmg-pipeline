@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import ReactMarkdown from 'react-markdown';
 import apiClient from '../lib/api';
 import type { Chat } from '../types';
 import {
@@ -351,7 +352,31 @@ export default function ChatPage() {
                                 </span>
                               </div>
                             )}
-                            <p style={{ fontSize: '14px', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>{message.content}</p>
+                            <div style={{ fontSize: '14px', lineHeight: '1.6' }} className="markdown-content">
+                              <ReactMarkdown
+                                components={{
+                                  p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+                                  strong: ({ children }) => <strong style={{ fontWeight: '600' }}>{children}</strong>,
+                                  em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+                                  code: ({ children }) => (
+                                    <code style={{
+                                      background: message.role === 'user' ? 'rgba(255,255,255,0.2)' : '#f3f4f6',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      fontSize: '13px',
+                                      fontFamily: 'monospace'
+                                    }}>
+                                      {children}
+                                    </code>
+                                  ),
+                                  ul: ({ children }) => <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>{children}</ul>,
+                                  ol: ({ children }) => <ol style={{ margin: '8px 0', paddingLeft: '20px' }}>{children}</ol>,
+                                  li: ({ children }) => <li style={{ margin: '4px 0' }}>{children}</li>,
+                                }}
+                              >
+                                {message.content}
+                              </ReactMarkdown>
+                            </div>
                           </div>
                           <span style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px', padding: '0 4px' }}>
                             {formatTime(message.timestamp)}
