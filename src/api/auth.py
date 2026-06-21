@@ -121,6 +121,29 @@ def verify_api_key(
     return authenticated_user
 
 
+def get_user_by_api_key(api_key: str, db: Session) -> Optional[User]:
+    """
+    Get user by API key (for query parameter authentication).
+
+    Args:
+        api_key: Plain text API key
+        db: Database session
+
+    Returns:
+        User object if valid, None otherwise
+    """
+    users = db.query(User).filter(User.is_active == True).all()
+
+    for user in users:
+        try:
+            if bcrypt.checkpw(api_key.encode('utf-8'), user.api_key_hash.encode('utf-8')):
+                return user
+        except Exception:
+            continue
+
+    return None
+
+
 def increment_usage(user: User, db: Session):
     """
     Increment the user's analysis usage counter.

@@ -585,14 +585,15 @@ def _get_detailed_status(session_id: str, user: User) -> str:
             api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
             frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 
+            # Use session_id as token for simple authentication
             if session.report_paths.get("xlsx"):
-                lines.append(f"📊 [Excel Report]({api_base}/download/{session_id}/xlsx)")
+                lines.append(f"📊 [Excel Report]({api_base}/download/{session_id}/xlsx?token={session_id})")
 
             if session.report_paths.get("tsv"):
-                lines.append(f"📄 [TSV Report]({api_base}/download/{session_id}/tsv)")
+                lines.append(f"📄 [TSV Report]({api_base}/download/{session_id}/tsv?token={session_id})")
 
             if session.report_paths.get("html"):
-                lines.append(f"🌐 [HTML Report]({api_base}/download/{session_id}/html)")
+                lines.append(f"🌐 [HTML Report]({api_base}/download/{session_id}/html?token={session_id})")
 
             lines.append(f"\n🔍 [View Full Results]({frontend_base}/analysis/{session_id})")
 

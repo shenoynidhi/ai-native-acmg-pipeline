@@ -580,17 +580,41 @@ def get_status(
 def download_report(
     session_id: str,
     format: str,
-    user: User = Depends(verify_api_key),
+    token: Optional[str] = None,
+    x_api_key: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
     """
     Download analysis report in specified format (xlsx, tsv, html).
+
+    Two authentication methods:
+    1. Via token query parameter: ?token=SESSION_ID (simple, session-based)
+    2. Via X-API-Key header (programmatic access)
     """
-    # Verify session belongs to user
-    session = db.query(DBSession).filter(
-        DBSession.session_id == session_id,
-        DBSession.user_id == user.user_id
-    ).first()
+    # Simple token-based auth: token is just the session_id
+    # This allows anyone with the session_id link to download (same as having the link)
+    if token and token == session_id:
+        # Valid token - allow download
+        session = db.query(DBSession).filter(
+            DBSession.session_id == session_id
+        ).first()
+    elif x_api_key:
+        # API key-based auth
+        from src.api.auth import get_user_by_api_key
+        user = get_user_by_api_key(x_api_key, db)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Verify session belongs to user
+        session = db.query(DBSession).filter(
+            DBSession.session_id == session_id,
+            DBSession.user_id == user.user_id
+        ).first()
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Add ?token=SESSION_ID to the URL"
+        )
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
