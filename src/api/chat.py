@@ -394,6 +394,7 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
     try:
         # Build parameters for your existing API
         from src.api.worker import submit_analysis
+        from src.api.db import get_db
 
         session_id = f"session_{uuid.uuid4().hex[:12]}"
 
@@ -416,6 +417,24 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
             params["proband_bam_path"] = form_data.get("proband_bam_path")
             params["parent1_bam_path"] = form_data.get("parent1_bam_path")
             params["parent2_bam_path"] = form_data.get("parent2_bam_path")
+
+        # Create database session record BEFORE submitting to Celery
+        db = next(get_db())
+        try:
+            db_session = DBSession(
+                session_id=session_id,
+                user_id=user.user_id,
+                vcf_path=vcf_path,
+                genome_build=params["genome_build"],
+                analysis_mode=form_data.get("mode", "solo"),
+                status="queued",
+                progress_pct=0,
+                current_step="Queued for processing..."
+            )
+            db.add(db_session)
+            db.commit()
+        finally:
+            db.close()
 
         # Submit to Celery worker (your existing pipeline)
         task_id = submit_analysis(
