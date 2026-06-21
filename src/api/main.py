@@ -15,7 +15,7 @@ from typing import Optional
 from datetime import datetime
 
 import redis.asyncio as aioredis
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, WebSocket
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, WebSocket, Header
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
