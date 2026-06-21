@@ -67,6 +67,7 @@ WHATSHAP_BINARY = Path(os.getenv("WHATSHAP_BINARY",
 # In Docker: set LLM_BASE_URL in docker-compose.yml or .env
 # On AWS:    set LLM_BASE_URL to SageMaker endpoint or hosted vLLM instance
 # ---------------------------------------------------------------------------
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "bedrock")  # "bedrock" or "vllm"
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://172.29.127.185:8000/v1")
 LLM_MODEL:    str = os.getenv("LLM_MODEL",    "qwen2.5-14b")
 LLM_API_KEY:  str = os.getenv("LLM_API_KEY",  "dummy")
