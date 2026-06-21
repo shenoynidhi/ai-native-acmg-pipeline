@@ -78,10 +78,13 @@ class Session(Base):
 
     session_id = Column(String, primary_key=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
+    patient_id = Column(String, nullable=True)  # Optional patient identifier
     genome_build = Column(String)
     clinical_notes = Column(Text)
     proband_sex = Column(String)
     vcf_filename = Column(String)
+    vcf_path = Column(String)  # Full path to VCF file
+    analysis_mode = Column(String, default="solo")  # "solo" or "trio"
 
     # Trio mode tracking
     trio_mode = Column(Boolean, default=False)  # True if parental VCFs provided
@@ -90,6 +93,9 @@ class Session(Base):
     proband_bam_filename = Column(String, nullable=True)  # Proband BAM for phasing
     parent1_bam_filename = Column(String, nullable=True)  # Mother's BAM for phasing
     parent2_bam_filename = Column(String, nullable=True)  # Father's BAM for phasing
+    father_id = Column(String, nullable=True)  # Father identifier
+    mother_id = Column(String, nullable=True)  # Mother identifier
+    hpo_terms = Column(JSON, nullable=True)  # List of HPO terms
 
     # Trio-specific results (for dashboard display)
     denovo_count = Column(Integer, default=0)  # Number of de novo variants (PS2)

@@ -60,18 +60,25 @@ def get_dashboard_analyses(
     # Format results
     results = []
     for s in sessions:
+        # Convert classifications from {variant_id: "P"} to {P: 5, LP: 3, ...}
+        classification_counts = {"P": 0, "LP": 0, "VUS": 0, "LB": 0, "B": 0}
+        if s.classifications:
+            for variant_id, classification in s.classifications.items():
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+
         item = {
             "session_id": s.session_id,
             "patient_id": s.patient_id,
             "status": s.status,
             "progress_pct": s.progress_pct or 0,
             "variant_count": s.variant_count,
-            "trio_mode": s.trio_mode,
+            "analysis_mode": s.analysis_mode or ("trio" if s.trio_mode else "solo"),
             "genome_build": s.genome_build,
             "vcf_filename": s.vcf_filename,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "completed_at": s.completed_at.isoformat() if s.completed_at else None,
-            "classifications": s.classifications or {},
+            "classifications": classification_counts,
         }
 
         # Add trio-specific metrics if available
@@ -149,18 +156,19 @@ def get_dashboard_stats(
     ).all()
 
     classification_totals = {
-        "pathogenic": 0,
-        "likely_pathogenic": 0,
-        "vus": 0,
-        "likely_benign": 0,
-        "benign": 0
+        "P": 0,
+        "LP": 0,
+        "VUS": 0,
+        "LB": 0,
+        "B": 0
     }
 
     for session in completed_sessions:
         if session.classifications:
-            for key, value in session.classifications.items():
-                if key in classification_totals:
-                    classification_totals[key] += value
+            # classifications format: {variant_id: "P"}
+            for variant_id, classification in session.classifications.items():
+                if classification in classification_totals:
+                    classification_totals[classification] += 1
 
     # Trio-specific stats
     trio_count = db.query(DBSession).filter(
@@ -186,8 +194,8 @@ def get_dashboard_stats(
         "running": running,
         "queued": queued,
         "failed": failed,
-        "total_variants_classified": int(total_variants),
-        "classifications": classification_totals,
+        "total_variants": int(total_variants),
+        "classification_distribution": classification_totals,
         "trio_stats": {
             "trio_analyses": trio_count,
             "total_denovo_variants": int(total_denovo),

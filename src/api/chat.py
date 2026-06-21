@@ -421,12 +421,18 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
         # Create database session record BEFORE submitting to Celery
         db = next(get_db())
         try:
+            mode = form_data.get("mode", "solo")
             db_session = DBSession(
                 session_id=session_id,
                 user_id=user.user_id,
                 vcf_path=vcf_path,
+                vcf_filename=Path(vcf_path).name if vcf_path else None,
                 genome_build=params["genome_build"],
-                analysis_mode=form_data.get("mode", "solo"),
+                analysis_mode=mode,
+                trio_mode=(mode == "trio"),
+                clinical_notes=params.get("clinical_notes", ""),
+                proband_sex=params.get("proband_sex", "unknown"),
+                hpo_terms=params.get("patient_hpo_terms", []),
                 status="queued",
                 progress_pct=0,
                 current_step="Queued for processing..."
