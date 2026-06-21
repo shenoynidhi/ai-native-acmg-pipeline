@@ -166,6 +166,53 @@ async def upload_file_to_chat(
             "uploaded_at": _now()
         })
 
+        # Update chat state based on file type and analysis mode
+        if ext in [".vcf", ".vcf.gz"]:
+            # Initialize context if not exists
+            if "context" not in chat:
+                chat["context"] = {"state": "idle", "form_data": {}}
+
+            context = chat["context"]
+            form_data = context.get("form_data", {})
+            mode = form_data.get("mode", "solo")  # Default to solo if not set
+
+            # Store VCF file path in form_data
+            if mode == "solo":
+                form_data["vcf_path"] = str(filepath)
+                context["state"] = "solo_vcf_uploaded"
+                # Add a helpful follow-up message
+                chat["messages"].append({
+                    "role": "assistant",
+                    "content": "Which genome build was used?\n\n🔹 **GRCh38** (recommended)\n🔹 **GRCh37**\n\nType `38` or `37`.",
+                    "timestamp": _now()
+                })
+            elif mode == "trio":
+                # Handle trio VCF uploads (proband, parent1, parent2)
+                if "vcf_path" not in form_data:
+                    form_data["vcf_path"] = str(filepath)
+                    chat["messages"].append({
+                        "role": "assistant",
+                        "content": "Great! Proband VCF uploaded ✅\n\nNow please upload **Father VCF** (parent 1).",
+                        "timestamp": _now()
+                    })
+                elif "parent1_vcf" not in form_data:
+                    form_data["parent1_vcf"] = str(filepath)
+                    chat["messages"].append({
+                        "role": "assistant",
+                        "content": "Father VCF uploaded ✅\n\nFinally, please upload **Mother VCF** (parent 2).",
+                        "timestamp": _now()
+                    })
+                elif "parent2_vcf" not in form_data:
+                    form_data["parent2_vcf"] = str(filepath)
+                    context["state"] = "trio_all_vcfs_uploaded"
+                    chat["messages"].append({
+                        "role": "assistant",
+                        "content": "All VCF files uploaded ✅\n\nWhich genome build was used?\n\n🔹 **GRCh38** (recommended)\n🔹 **GRCh37**\n\nType `38` or `37`.",
+                        "timestamp": _now()
+                    })
+
+            context["form_data"] = form_data
+
         # Save chat
         ChatStore.save_chat(chat_id, chat)
 
