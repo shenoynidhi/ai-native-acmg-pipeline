@@ -267,7 +267,7 @@ export default function ChatPage() {
                         {chat.title}
                       </p>
                       <p style={{ fontSize: '12px', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '4px' }}>
-                        {chat.messages[chat.messages.length - 1]?.content.slice(0, 40) || 'New chat'}
+                        {chat.messages && chat.messages.length > 0 ? chat.messages[chat.messages.length - 1]?.content.slice(0, 40) : 'New chat'}
                       </p>
                     </div>
                     <button
