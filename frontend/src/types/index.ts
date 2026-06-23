@@ -28,7 +28,7 @@ export interface Session {
   created_at: string;
   started_at?: string;
   completed_at?: string;
-  error_message?: string;
+  error?: string;
 }
 
 export interface Variant {

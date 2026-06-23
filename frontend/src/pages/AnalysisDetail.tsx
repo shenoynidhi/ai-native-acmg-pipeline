@@ -231,11 +231,11 @@ export default function AnalysisDetail() {
         )}
 
         {/* Error Section (Failed) */}
-        {isFailed && session.error_message && (
+        {isFailed && session.error && (
           <Alert variant="destructive" className="mb-6">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              <strong>Analysis Failed:</strong> {session.error_message}
+              <strong>Analysis Failed:</strong> {session.error}
             </AlertDescription>
           </Alert>
         )}
