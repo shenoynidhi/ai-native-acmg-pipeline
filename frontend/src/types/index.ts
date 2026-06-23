@@ -94,6 +94,12 @@ export interface ChatMessage {
     file_type: string;
     file_path: string;
   };
+  actions?: Array<{
+    label: string;
+    command?: string;
+    url?: string;
+    type: 'primary' | 'secondary';
+  }>;
 }
 
 export interface ProgressEvent {

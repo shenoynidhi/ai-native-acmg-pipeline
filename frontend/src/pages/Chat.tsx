@@ -377,6 +377,75 @@ export default function ChatPage() {
                                 {message.content}
                               </ReactMarkdown>
                             </div>
+
+                            {/* Action Buttons */}
+                            {message.actions && message.actions.length > 0 && (
+                              <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                {message.actions.map((action: any, actionIdx: number) => (
+                                  action.command ? (
+                                    <button
+                                      key={actionIdx}
+                                      onClick={() => {
+                                        setMessageInput(action.command);
+                                        setTimeout(() => handleSendMessage(), 100);
+                                      }}
+                                      style={{
+                                        padding: '8px 16px',
+                                        background: action.type === 'primary' ? 'linear-gradient(135deg, #10b981 0%, #14b8a6 100%)' : 'white',
+                                        color: action.type === 'primary' ? 'white' : '#10b981',
+                                        border: action.type === 'primary' ? 'none' : '1px solid #10b981',
+                                        borderRadius: '8px',
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)',
+                                        transition: 'all 0.2s',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.transform = 'translateY(-1px)';
+                                        e.currentTarget.style.boxShadow = '0 4px 8px rgba(16, 185, 129, 0.3)';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                        e.currentTarget.style.boxShadow = '0 2px 4px rgba(16, 185, 129, 0.2)';
+                                      }}
+                                    >
+                                      {action.label}
+                                    </button>
+                                  ) : action.url ? (
+                                    <a
+                                      key={actionIdx}
+                                      href={action.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      style={{
+                                        padding: '8px 16px',
+                                        background: action.type === 'primary' ? 'linear-gradient(135deg, #10b981 0%, #14b8a6 100%)' : 'white',
+                                        color: action.type === 'primary' ? 'white' : '#10b981',
+                                        border: action.type === 'primary' ? 'none' : '1px solid #10b981',
+                                        borderRadius: '8px',
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        textDecoration: 'none',
+                                        display: 'inline-block',
+                                        boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)',
+                                        transition: 'all 0.2s',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.transform = 'translateY(-1px)';
+                                        e.currentTarget.style.boxShadow = '0 4px 8px rgba(16, 185, 129, 0.3)';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                        e.currentTarget.style.boxShadow = '0 2px 4px rgba(16, 185, 129, 0.2)';
+                                      }}
+                                    >
+                                      {action.label}
+                                    </a>
+                                  ) : null
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <span style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px', padding: '0 4px' }}>
                             {formatTime(message.timestamp)}

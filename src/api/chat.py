@@ -277,6 +277,12 @@ def send_message(
         "content": response_text,
         "timestamp": now,
     }
+
+    # Check if response contains action buttons metadata
+    if isinstance(response_text, dict):
+        assistant_msg["content"] = response_text.get("content", "")
+        assistant_msg["actions"] = response_text.get("actions", [])
+
     chat["messages"].append(assistant_msg)
     chat["updated_at"] = now
 
@@ -460,18 +466,28 @@ def _submit_analysis(form_data: Dict, user: User) -> str:
         import os
         frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 
-        return f"""✅ **Analysis submitted successfully!**
+        # Return structured response with action buttons
+        return {
+            "content": f"""✅ **Analysis submitted successfully!**
 
 **Mode:** {mode_label}
 **Session ID:** `{session_id}`
 **Genome Build:** {params['genome_build']}
 
-Your analysis is now queued. Use the commands below to track progress:
-
-📊 `/status {session_id}` - Check current status and get download links when complete
-🔍 [View results in Dashboard]({frontend_base}/analysis/{session_id})
-
-I'll check back and notify you when reports are ready for download! 🎉"""
+Your analysis is now queued. Click the buttons below to track progress:""",
+            "actions": [
+                {
+                    "label": "📊 Check Status",
+                    "command": f"/status {session_id}",
+                    "type": "primary"
+                },
+                {
+                    "label": "🔍 View Dashboard",
+                    "url": f"{frontend_base}/analysis/{session_id}",
+                    "type": "secondary"
+                }
+            ]
+        }
 
     except Exception as e:
         logger.error(f"Analysis submission failed: {e}", exc_info=True)
@@ -546,8 +562,8 @@ def _help_message() -> str:
 What would you like to do?"""
 
 
-def _get_detailed_status(session_id: str, user: User) -> str:
-    """Get detailed status of a specific analysis with download links."""
+def _get_detailed_status(session_id: str, user: User):
+    """Get detailed status of a specific analysis with download links and action buttons."""
     from src.api.db import SessionLocal
     import os
 
@@ -578,32 +594,62 @@ def _get_detailed_status(session_id: str, user: User) -> str:
         if session.variant_count:
             lines.append(f"**Variants:** {session.variant_count}")
 
+        api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+        frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+
+        actions = []
+
         # Show download links if complete
         if session.status == "complete" and session.report_paths:
-            lines.append("\n📥 **Download Reports:**\n")
+            lines.append("\n✅ **Analysis Complete!** Click below to download reports:")
 
-            api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
-            frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
-
-            # Use session_id as token for simple authentication
+            # Add download action buttons
             if session.report_paths.get("xlsx"):
-                lines.append(f"📊 [Excel Report]({api_base}/download/{session_id}/xlsx?token={session_id})")
-
-            if session.report_paths.get("tsv"):
-                lines.append(f"📄 [TSV Report]({api_base}/download/{session_id}/tsv?token={session_id})")
+                actions.append({
+                    "label": "📊 Download Excel",
+                    "url": f"{api_base}/download/{session_id}/xlsx?token={session_id}",
+                    "type": "primary"
+                })
 
             if session.report_paths.get("html"):
-                lines.append(f"🌐 [HTML Report]({api_base}/download/{session_id}/html?token={session_id})")
+                actions.append({
+                    "label": "🌐 View HTML Report",
+                    "url": f"{api_base}/download/{session_id}/html?token={session_id}",
+                    "type": "secondary"
+                })
 
-            lines.append(f"\n🔍 [View Full Results]({frontend_base}/analysis/{session_id})")
+            if session.report_paths.get("tsv"):
+                actions.append({
+                    "label": "📄 Download TSV",
+                    "url": f"{api_base}/download/{session_id}/tsv?token={session_id}",
+                    "type": "secondary"
+                })
+
+            actions.append({
+                "label": "🔍 View Full Results",
+                "url": f"{frontend_base}/analysis/{session_id}",
+                "type": "secondary"
+            })
 
         elif session.status == "failed":
             lines.append(f"\n❌ **Error:** {session.error or 'Unknown error'}")
 
         elif session.status in ["queued", "running"]:
-            lines.append("\n⏳ Analysis in progress... Check back soon!")
+            lines.append("\n⏳ Analysis in progress... Refresh to see updates!")
+            actions.append({
+                "label": "🔄 Refresh Status",
+                "command": f"/status {session_id}",
+                "type": "primary"
+            })
 
-        return "\n".join(lines)
+        # Return structured response with action buttons
+        if actions:
+            return {
+                "content": "\n".join(lines),
+                "actions": actions
+            }
+        else:
+            return "\n".join(lines)
 
     finally:
         db.close()
