@@ -70,6 +70,7 @@ def query_clinvar_by_variant(
     ref: str,
     alt: str,
     gene: str,
+    genome_build: str = "GRCh38",
     n_results: int = 10,
 ) -> list[dict]:
     """
@@ -79,10 +80,24 @@ def query_clinvar_by_variant(
         1. Exact coordinate filter (same chrom+pos) for PS1 (same amino acid change).
         2. Semantic search within gene for PP5/BP6 (same gene, similar consequence).
 
+    Args:
+        chrom: Chromosome
+        pos: Position
+        ref: Reference allele
+        alt: Alternate allele
+        gene: Gene symbol
+        genome_build: "GRCh38" or "GRCh37"
+        n_results: Max results to return
+
     Returns list of dicts with keys: text, clnsig, stars, chrom, pos, ref, alt, gene.
     """
-    collection = _get_collection("clinvar_variants")
+    # Use build-specific collection
+    build_suffix = genome_build.lower()
+    collection_name = f"clinvar_variants_{build_suffix}"
+    collection = _get_collection(collection_name)
+
     if collection is None:
+        logger.warning(f"ClinVar collection not found: {collection_name}")
         return []
 
     results = []
@@ -120,15 +135,27 @@ def query_clinvar_by_variant(
 def query_clinvar_same_codon(
     gene: str,
     protein_pos: int,
+    genome_build: str = "GRCh38",
     n_results: int = 10,
 ) -> list[dict]:
     """
     Agent 8 — PM5: find P/LP ClinVar variants at the same codon (±2 residues).
 
+    Args:
+        gene: Gene symbol
+        protein_pos: Protein position
+        genome_build: "GRCh38" or "GRCh37"
+        n_results: Max results to return
+
     Returns list of dicts with keys: text, clnsig, chrom, pos, ref, alt, gene, protein_pos.
     """
-    collection = _get_collection("clinvar_gene_variants")
+    # Use build-specific collection
+    build_suffix = genome_build.lower()
+    collection_name = f"clinvar_gene_variants_{build_suffix}"
+    collection = _get_collection(collection_name)
+
     if collection is None:
+        logger.warning(f"ClinVar gene collection not found: {collection_name}")
         return []
 
     results = []
@@ -222,6 +249,7 @@ def query_uniprot_domains(
 
 def query_clinvar_for_gene(
     gene: str,
+    genome_build: str = "GRCh38",
     significance_filter: Optional[str] = None,
     n_results: int = 15,
 ) -> list[dict]:
@@ -230,14 +258,20 @@ def query_clinvar_for_gene(
 
     Args:
         gene: HGNC gene symbol.
+        genome_build: "GRCh38" or "GRCh37"
         significance_filter: Optional filter string, e.g. "pathogenic" or "benign".
                              Applied as a substring match on the clnsig metadata field.
         n_results: Max results to return.
 
     Returns list of ClinVar entry dicts.
     """
-    collection = _get_collection("clinvar_variants")
+    # Use build-specific collection
+    build_suffix = genome_build.lower()
+    collection_name = f"clinvar_variants_{build_suffix}"
+    collection = _get_collection(collection_name)
+
     if collection is None:
+        logger.warning(f"ClinVar collection not found: {collection_name}")
         return []
 
     query_text = f"{gene} variant classification"
@@ -291,6 +325,72 @@ def _format_results(chroma_result: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# ACMG Guidelines Query — for debate layer
+# ---------------------------------------------------------------------------
+
+def query_acmg_guidelines(query: str, n_results: int = 10) -> list[dict]:
+    """
+    Query ACMG guidelines collection for criterion interpretation.
+    Used by debate layer (pathogenic_advocate, benign_advocate, final_arbiter).
+
+    Args:
+        query: Search query (criterion code, gene context, combination rules)
+        n_results: Max results to return
+
+    Returns:
+        List of dicts with keys: text, metadata, score
+    """
+    collection = _get_collection("acmg_guidelines")
+    if collection is None:
+        logger.warning("acmg_guidelines collection not found - debate will have limited guidance")
+        return []
+
+    try:
+        raw = collection.query(
+            query_texts=[query],
+            n_results=n_results
+        )
+        return _format_results(raw)
+    except Exception as e:
+        logger.error(f"ACMG guidelines query failed: {e}")
+        return []
+
+
+def query_actionability_guidelines(gene: str, variant_type: str = "", n_results: int = 10) -> list[dict]:
+    """
+    Query clinical actionability guidelines (OncoKB, CIViC, NCCN).
+    Used for therapeutic recommendations and genetic counseling.
+
+    Args:
+        gene: Gene symbol
+        variant_type: Optional variant type filter
+        n_results: Max results
+
+    Returns:
+        List of actionability recommendations
+    """
+    collection = _get_collection("clinical_actionability")
+    if collection is None:
+        logger.debug("clinical_actionability collection not found - skipping actionability queries")
+        return []
+
+    query_text = f"{gene} therapeutic actionability clinical trial"
+    if variant_type:
+        query_text += f" {variant_type}"
+
+    try:
+        raw = collection.query(
+            query_texts=[query_text],
+            n_results=n_results,
+            where={"gene": {"$eq": gene}} if gene else None
+        )
+        return _format_results(raw)
+    except Exception as e:
+        logger.debug(f"Actionability query failed for {gene}: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Health check — call at startup to verify collections are present
 # ---------------------------------------------------------------------------
 
@@ -299,7 +399,15 @@ def check_collections() -> dict[str, bool]:
     Returns a dict of {collection_name: is_available} for all expected collections.
     Agents should call this at startup and degrade gracefully if a collection is absent.
     """
-    names = ["clinvar_variants", "clinvar_gene_variants", "uniprot_domains", "acmg_guidelines"]
+    names = [
+        "clinvar_variants_grch38",
+        "clinvar_variants_grch37",
+        "clinvar_gene_variants_grch38",
+        "clinvar_gene_variants_grch37",
+        "uniprot_domains",
+        "acmg_guidelines",
+        "clinical_actionability"
+    ]
     status = {}
     client = _get_client()
     try:
@@ -311,4 +419,66 @@ def check_collections() -> dict[str, bool]:
         status[name] = name in existing
 
     return status
+
+
+# ---------------------------------------------------------------------------
+# RAGRetriever class wrapper — for backward compatibility
+# ---------------------------------------------------------------------------
+
+class RAGRetriever:
+    """
+    Wrapper class providing a unified interface to all RAG query functions.
+    Used by debate layer and agents that need RAG access.
+
+    This class exists for backward compatibility with code that expects
+    a RAGRetriever instance. All methods delegate to the module-level functions.
+    """
+
+    def __init__(self, genome_build: str = "GRCh38"):
+        """
+        Initialize the retriever.
+
+        Args:
+            genome_build: "GRCh38" or "GRCh37" - determines which ClinVar collection to use
+        """
+        self.genome_build = genome_build
+
+    # ClinVar queries
+    def query_clinvar_by_variant(self, chrom: str, pos: int, ref: str, alt: str,
+                                 gene: str, n_results: int = 10) -> list[dict]:
+        """Query ClinVar for variants at same position or in same gene."""
+        return query_clinvar_by_variant(chrom, pos, ref, alt, gene, self.genome_build, n_results)
+
+    def query_clinvar_same_codon(self, gene: str, protein_pos: int,
+                                 n_results: int = 10) -> list[dict]:
+        """Query ClinVar for P/LP variants at same codon (PM5)."""
+        return query_clinvar_same_codon(gene, protein_pos, self.genome_build, n_results)
+
+    def query_clinvar_for_gene(self, gene: str, significance_filter: Optional[str] = None,
+                              n_results: int = 15) -> list[dict]:
+        """General gene-level ClinVar query."""
+        return query_clinvar_for_gene(gene, self.genome_build, significance_filter, n_results)
+
+    # UniProt queries
+    def query_uniprot_domains(self, gene: str, protein_position: int,
+                             n_results: int = 10) -> list[dict]:
+        """Query UniProt for functional domains/sites at protein position (PM1)."""
+        return query_uniprot_domains(gene, protein_position, n_results)
+
+    # ACMG guidelines queries
+    def query_acmg_guidelines(self, query: str, n_results: int = 10) -> list[dict]:
+        """Query ACMG guidelines for criterion interpretation."""
+        return query_acmg_guidelines(query, n_results)
+
+    # Actionability queries
+    def query_actionability_guidelines(self, gene: str, variant_type: str = "",
+                                      n_results: int = 10) -> list[dict]:
+        """Query clinical actionability guidelines."""
+        return query_actionability_guidelines(gene, variant_type, n_results)
+
+    # Health check
+    def check_collections(self) -> dict[str, bool]:
+        """Check which RAG collections are available."""
+        return check_collections()
+
 
