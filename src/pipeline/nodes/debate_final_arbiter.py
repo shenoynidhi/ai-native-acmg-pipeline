@@ -308,7 +308,8 @@ def debate_final_arbiter_node(state: VariantState) -> dict:
     system_prompt = _build_system_prompt(guideline_chunks)
     user_prompt   = _build_user_prompt(state)
 
-    raw_result = call_llm_json(system_prompt, user_prompt)
+    # Increase max_tokens to prevent JSON truncation (default 1000 → 2048)
+    raw_result = call_llm_json(system_prompt, user_prompt, max_tokens=2048)
 
     result = _validate_arbiter_output(raw_result, state, variant_id)
 
@@ -531,4 +532,5 @@ def _validate_arbiter_output(raw: dict, state: VariantState, variant_id: str) ->
         "debate_notes":                       raw.get("debate_notes", ""),
         "unevaluated_criteria_report":        unevaluated_report,
     }
+
 

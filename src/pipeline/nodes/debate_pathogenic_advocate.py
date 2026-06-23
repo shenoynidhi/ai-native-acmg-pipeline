@@ -115,13 +115,23 @@ def _query_acmg_guidelines_pathogenic(fired_criteria: list[str], gene: str, cons
         return []
 
 
-def _query_clinvar_for_variant(hgvs_p: Optional[str], hgvs_c: Optional[str], gene: str) -> list[str]:
+def _query_clinvar_for_variant(hgvs_p: Optional[str], hgvs_c: Optional[str], gene: str, genome_build: str = "GRCh38") -> list[str]:
     """
     Query clinvar_variants collection for any P/LP entries matching this variant.
     Returns list of relevant ClinVar document strings.
+
+    Args:
+        hgvs_p: HGVS protein notation
+        hgvs_c: HGVS cDNA notation
+        gene: Gene symbol
+        genome_build: "GRCh38" or "GRCh37" (default: "GRCh38")
     """
     try:
-        col = _get_chroma_collection("clinvar_variants")
+        # Use build-specific collection name
+        build_suffix = genome_build.lower()
+        collection_name = f"clinvar_variants_{build_suffix}"
+        col = _get_chroma_collection(collection_name)
+
         query_parts = [gene]
         if hgvs_p:
             query_parts.append(hgvs_p)
@@ -254,10 +264,11 @@ def debate_pathogenic_advocate_node(state: VariantState) -> dict:
     consequence = state.get("consequence", "")
     hgvs_p      = state.get("hgvs_p", "")
     hgvs_c      = state.get("hgvs_c", "")
+    genome_build = state.get("genome_build", "GRCh38")
 
     # RAG queries
     guideline_chunks = _query_acmg_guidelines_pathogenic(fired_p, gene, consequence)
-    clinvar_chunks   = _query_clinvar_for_variant(hgvs_p, hgvs_c, gene)
+    clinvar_chunks   = _query_clinvar_for_variant(hgvs_p, hgvs_c, gene, genome_build)
 
     logger.info(
         f"[pathogenic_advocate] RAG: {len(guideline_chunks)} guideline chunks, "
@@ -267,7 +278,8 @@ def debate_pathogenic_advocate_node(state: VariantState) -> dict:
     system_prompt = _build_system_prompt(guideline_chunks)
     user_prompt   = _build_user_prompt(state, clinvar_chunks)
 
-    raw_result = call_llm_json(system_prompt, user_prompt)
+    # Increase max_tokens to prevent JSON truncation (default 1000 → 2048)
+    raw_result = call_llm_json(system_prompt, user_prompt, max_tokens=2048)
 
     # Validate and normalise output
     result = _validate_advocate_output(raw_result, variant_id)
@@ -308,4 +320,5 @@ def _validate_advocate_output(raw: dict, variant_id: str) -> dict:
         "rag_evidence_used":            raw.get("rag_evidence_used", []),
         "confidence":                   confidence,
     }
+
 
