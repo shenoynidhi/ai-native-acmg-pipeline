@@ -1,12 +1,14 @@
-import { cn } from "@/lib/utils"
+import * as React from "react"
 
 function Skeleton({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
+  const classes = ["skeleton", className].filter(Boolean).join(" ");
+
   return (
     <div
-      className={cn("animate-pulse rounded-md bg-primary/10", className)}
+      className={classes}
       {...props}
     />
   )
