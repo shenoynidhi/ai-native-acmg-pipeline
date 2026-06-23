@@ -21,23 +21,35 @@ export default function Analyze() {
   const [probandVcf, setProbandVcf] = useState<File | null>(null);
   const [fatherVcf, setFatherVcf] = useState<File | null>(null);
   const [motherVcf, setMotherVcf] = useState<File | null>(null);
+  const [probandBam, setProbandBam] = useState<File | null>(null);
+  const [fatherBam, setFatherBam] = useState<File | null>(null);
+  const [motherBam, setMotherBam] = useState<File | null>(null);
   const [genomeBuild, setGenomeBuild] = useState('GRCh38');
   const [patientId, setPatientId] = useState('');
   const [probandSex, setProbandSex] = useState<'male' | 'female'>('male');
   const [clinicalNotes, setClinicalNotes] = useState('');
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, type: 'proband' | 'father' | 'mother') => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, type: 'proband' | 'father' | 'mother', fileType: 'vcf' | 'bam' = 'vcf') => {
     const file = e.target.files?.[0];
     if (file) {
-      if (!file.name.endsWith('.vcf') && !file.name.endsWith('.vcf.gz')) {
-        setError('Please select a valid VCF file (.vcf or .vcf.gz)');
-        return;
+      if (fileType === 'vcf') {
+        if (!file.name.endsWith('.vcf') && !file.name.endsWith('.vcf.gz')) {
+          setError('Please select a valid VCF file (.vcf or .vcf.gz)');
+          return;
+        }
+        if (type === 'proband') setProbandVcf(file);
+        else if (type === 'father') setFatherVcf(file);
+        else if (type === 'mother') setMotherVcf(file);
+      } else if (fileType === 'bam') {
+        if (!file.name.endsWith('.bam')) {
+          setError('Please select a valid BAM file (.bam)');
+          return;
+        }
+        if (type === 'proband') setProbandBam(file);
+        else if (type === 'father') setFatherBam(file);
+        else if (type === 'mother') setMotherBam(file);
       }
       setError('');
-
-      if (type === 'proband') setProbandVcf(file);
-      else if (type === 'father') setFatherVcf(file);
-      else if (type === 'mother') setMotherVcf(file);
     }
   };
 
@@ -66,9 +78,14 @@ export default function Analyze() {
       if (patientId) formData.append('patient_id', patientId);
       if (clinicalNotes) formData.append('clinical_notes', clinicalNotes);
 
+      // Add BAM files if provided (improves phasing accuracy!)
+      if (probandBam) formData.append('proband_bam', probandBam);
+
       if (mode === 'trio') {
         if (fatherVcf) formData.append('parent1_vcf', fatherVcf);
         if (motherVcf) formData.append('parent2_vcf', motherVcf);
+        if (fatherBam) formData.append('parent2_bam', fatherBam);
+        if (motherBam) formData.append('parent1_bam', motherBam);
         formData.append('proband_sex', probandSex);
       }
 
@@ -149,7 +166,7 @@ export default function Analyze() {
                     id="proband-vcf"
                     type="file"
                     accept=".vcf,.vcf.gz"
-                    onChange={(e) => handleFileSelect(e, 'proband')}
+                    onChange={(e) => handleFileSelect(e, 'proband', 'vcf')}
                     disabled={loading}
                     className="cursor-pointer"
                   />
@@ -162,6 +179,32 @@ export default function Analyze() {
                 </div>
               </div>
 
+              {/* Proband BAM - CRITICAL for phasing! */}
+              <div className="space-y-2">
+                <Label htmlFor="proband-bam">
+                  {mode === 'trio' ? 'Proband BAM File (Optional - Highly Recommended)' : 'BAM File (Optional - Highly Recommended)'}
+                </Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    id="proband-bam"
+                    type="file"
+                    accept=".bam"
+                    onChange={(e) => handleFileSelect(e, 'proband', 'bam')}
+                    disabled={loading}
+                    className="cursor-pointer"
+                  />
+                  {probandBam && (
+                    <div className="flex items-center gap-2 text-sm text-green-600">
+                      <FileText className="h-4 w-4" />
+                      {probandBam.name}
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  📊 BAM files dramatically improve phasing accuracy for compound heterozygosity detection (PM3/BP2 criteria)
+                </p>
+              </div>
+
               {/* Trio Mode: Father and Mother VCF */}
               {mode === 'trio' && (
                 <>
@@ -172,7 +215,7 @@ export default function Analyze() {
                         id="father-vcf"
                         type="file"
                         accept=".vcf,.vcf.gz"
-                        onChange={(e) => handleFileSelect(e, 'father')}
+                        onChange={(e) => handleFileSelect(e, 'father', 'vcf')}
                         disabled={loading}
                         className="cursor-pointer"
                       />
@@ -186,13 +229,36 @@ export default function Analyze() {
                   </div>
 
                   <div className="space-y-2">
+                    <Label htmlFor="father-bam">Father BAM File (Optional - Recommended)</Label>
+                    <div className="flex items-center gap-3">
+                      <Input
+                        id="father-bam"
+                        type="file"
+                        accept=".bam"
+                        onChange={(e) => handleFileSelect(e, 'father', 'bam')}
+                        disabled={loading}
+                        className="cursor-pointer"
+                      />
+                      {fatherBam && (
+                        <div className="flex items-center gap-2 text-sm text-green-600">
+                          <FileText className="h-4 w-4" />
+                          {fatherBam.name}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Improves de novo variant confirmation
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="mother-vcf">Mother VCF File *</Label>
                     <div className="flex items-center gap-3">
                       <Input
                         id="mother-vcf"
                         type="file"
                         accept=".vcf,.vcf.gz"
-                        onChange={(e) => handleFileSelect(e, 'mother')}
+                        onChange={(e) => handleFileSelect(e, 'mother', 'vcf')}
                         disabled={loading}
                         className="cursor-pointer"
                       />
@@ -203,6 +269,29 @@ export default function Analyze() {
                         </div>
                       )}
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="mother-bam">Mother BAM File (Optional - Recommended)</Label>
+                    <div className="flex items-center gap-3">
+                      <Input
+                        id="mother-bam"
+                        type="file"
+                        accept=".bam"
+                        onChange={(e) => handleFileSelect(e, 'mother', 'bam')}
+                        disabled={loading}
+                        className="cursor-pointer"
+                      />
+                      {motherBam && (
+                        <div className="flex items-center gap-2 text-sm text-green-600">
+                          <FileText className="h-4 w-4" />
+                          {motherBam.name}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Improves de novo variant confirmation
+                    </p>
                   </div>
 
                   <div className="space-y-2">
