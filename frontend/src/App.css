@@ -1027,6 +1027,134 @@ button[data-state]:focus {
 }
 
 /* ========================================================================
+   Chat Page Responsive Styles
+   ======================================================================== */
+
+/* Sidebar responsive */
+.chat-sidebar {
+  width: 320px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-right: 1px solid rgba(16, 185, 129, 0.2);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 1px 0 3px rgba(0, 0, 0, 0.05);
+  transition: transform 0.3s ease;
+}
+
+@media (max-width: 768px) {
+  .chat-sidebar {
+    position: fixed;
+    left: 0;
+    top: 65px;
+    bottom: 0;
+    width: 280px;
+    z-index: 40;
+    transform: translateX(-100%);
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .chat-sidebar.mobile-open {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-sidebar {
+    width: 100%;
+    max-width: 320px;
+  }
+}
+
+/* Chat header responsive */
+.chat-header {
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.2) !important;
+  padding: 12px 16px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+
+@media (max-width: 640px) {
+  .chat-header {
+    padding: 10px 12px !important;
+  }
+}
+
+/* Message bubbles responsive */
+.chat-message-bubble {
+  max-width: 70%;
+}
+
+@media (max-width: 768px) {
+  .chat-message-bubble {
+    max-width: 85%;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-message-bubble {
+    max-width: 90%;
+  }
+}
+
+/* Chat input area responsive */
+.chat-input-area {
+  border-top: 1px solid rgba(16, 185, 129, 0.2);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  padding: 16px;
+  box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.05);
+}
+
+@media (max-width: 640px) {
+  .chat-input-area {
+    padding: 12px;
+  }
+}
+
+/* Chat messages container */
+.chat-messages {
+  padding: 24px;
+}
+
+@media (max-width: 768px) {
+  .chat-messages {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-messages {
+    padding: 12px;
+  }
+}
+
+/* Chat input buttons mobile optimization */
+@media (max-width: 640px) {
+  .chat-input-area textarea {
+    min-height: 48px !important;
+    font-size: 16px !important; /* Prevents zoom on iOS */
+  }
+
+  .chat-input-area button {
+    min-width: 44px !important;
+    padding: 10px !important;
+  }
+}
+
+/* Welcome screen responsive */
+@media (max-width: 640px) {
+  .chat-main h2 {
+    font-size: 20px !important;
+  }
+
+  .chat-main p {
+    font-size: 14px !important;
+  }
+}
+
+/* ========================================================================
    Utility Classes
    ======================================================================== */
 

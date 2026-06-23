@@ -146,7 +146,7 @@ export default function ChatPage() {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Top Header */}
-      <header className="chat-header" style={{ background: 'white', borderBottom: '1px solid #d1fae5', padding: '12px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+      <header className="chat-header">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ width: '40px', height: '40px', background: 'linear-gradient(135deg, #10b981 0%, #14b8a6 100%)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}>
@@ -176,7 +176,7 @@ export default function ChatPage() {
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Sidebar - Chat List */}
-        <div className="chat-sidebar" style={{ width: '320px', background: 'white', borderRight: '1px solid #d1fae5', display: 'flex', flexDirection: 'column', boxShadow: '1px 0 3px rgba(0,0,0,0.05)' }}>
+        <div className="chat-sidebar">
           {/* New Chat Button */}
           <div style={{ padding: '16px' }}>
             <button
@@ -269,7 +269,7 @@ export default function ChatPage() {
           </div>
 
           {/* Help Section */}
-          <div style={{ padding: '16px', background: '#d1fae5', borderTop: '1px solid #10b981' }}>
+          <div style={{ padding: '12px 16px', background: 'rgba(209, 250, 229, 0.9)', backdropFilter: 'blur(10px)', borderTop: '1px solid rgba(16, 185, 129, 0.3)' }}>
             <div style={{ fontSize: '11px' }}>
               <p style={{ fontWeight: '600', color: '#065f46', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
                 <Sparkles size={12} />
@@ -308,7 +308,7 @@ export default function ChatPage() {
           ) : (
             <>
               {/* Messages Area */}
-              <div ref={scrollRef} className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+              <div ref={scrollRef} className="chat-messages" style={{ flex: 1, overflowY: 'auto' }}>
                 <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
                   {chatLoading ? (
                     <div style={{ textAlign: 'center', paddingTop: '32px' }}>
@@ -332,7 +332,7 @@ export default function ChatPage() {
                             <Bot size={20} color="white" />
                           </div>
                         )}
-                        <div className="chat-message-bubble" style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '70%' }}>
+                        <div className="chat-message-bubble" style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
                           <div
                             style={{
                               borderRadius: '16px',
@@ -404,15 +404,15 @@ export default function ChatPage() {
               </div>
 
               {/* Input Area */}
-              <div className="chat-input-area" style={{ borderTop: '1px solid #d1fae5', background: 'white', padding: '16px', boxShadow: '0 -1px 3px rgba(0,0,0,0.05)' }}>
+              <div className="chat-input-area">
                 <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
                   {uploadingFile && (
-                    <div style={{ marginBottom: '12px', padding: '12px', background: '#d1fae5', border: '1px solid #10b981', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ marginBottom: '12px', padding: '12px', background: 'rgba(209, 250, 229, 0.9)', backdropFilter: 'blur(10px)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Loader2 size={16} color="#10b981" style={{ animation: 'spin 1s linear infinite' }} />
                       <span style={{ fontSize: '14px', color: '#065f46' }}>Uploading and analyzing file...</span>
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'nowrap' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -423,7 +423,7 @@ export default function ChatPage() {
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       disabled={uploadingFile || !selectedChatId}
-                      style={{ padding: '12px', background: 'white', border: '1px solid #d1d5db', borderRadius: '8px', cursor: uploadingFile || !selectedChatId ? 'not-allowed' : 'pointer', flexShrink: 0 }}
+                      style={{ padding: '12px', background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(10px)', border: '1px solid rgba(209, 213, 219, 0.5)', borderRadius: '8px', cursor: uploadingFile || !selectedChatId ? 'not-allowed' : 'pointer', flexShrink: 0 }}
                     >
                       <Upload size={20} color="#6b7280" />
                     </button>
@@ -438,13 +438,13 @@ export default function ChatPage() {
                         }
                       }}
                       disabled={sendMessageMutation.isPending}
-                      style={{ flex: 1, minWidth: '0', padding: '12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', resize: 'none', minHeight: '60px', maxHeight: '200px', fontFamily: 'inherit' }}
+                      style={{ flex: 1, minWidth: 0, padding: '12px', border: '1px solid rgba(209, 213, 219, 0.5)', borderRadius: '8px', fontSize: '14px', resize: 'none', minHeight: '60px', maxHeight: '200px', fontFamily: 'inherit', background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(10px)' }}
                       rows={2}
                     />
                     <button
                       onClick={handleSendMessage}
                       disabled={!messageInput.trim() || sendMessageMutation.isPending}
-                      style={{ padding: '12px', background: !messageInput.trim() || sendMessageMutation.isPending ? '#9ca3af' : 'linear-gradient(135deg, #10b981 0%, #14b8a6 100%)', color: 'white', border: 'none', borderRadius: '8px', cursor: !messageInput.trim() || sendMessageMutation.isPending ? 'not-allowed' : 'pointer', flexShrink: 0, boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)' }}
+                      style={{ padding: '12px 16px', background: !messageInput.trim() || sendMessageMutation.isPending ? '#9ca3af' : 'linear-gradient(135deg, #10b981 0%, #14b8a6 100%)', color: 'white', border: 'none', borderRadius: '8px', cursor: !messageInput.trim() || sendMessageMutation.isPending ? 'not-allowed' : 'pointer', flexShrink: 0, boxShadow: '0 2px 4px rgba(16, 185, 129, 0.3)', minWidth: '48px' }}
                     >
                       <Send size={20} />
                     </button>
