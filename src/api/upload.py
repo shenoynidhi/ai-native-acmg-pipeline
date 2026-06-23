@@ -76,9 +76,11 @@ async def upload_file_to_chat(
     file_id = str(uuid.uuid4())
     filename_lower = file.filename.lower()
 
-    # Determine file extension (handle .vcf.gz)
+    # Determine file extension (handle .vcf.gz and .bam)
     if filename_lower.endswith('.vcf.gz'):
         ext = '.vcf.gz'
+    elif filename_lower.endswith('.bam'):
+        ext = '.bam'
     else:
         ext = Path(file.filename).suffix.lower()
 
@@ -109,6 +111,10 @@ async def upload_file_to_chat(
         elif ext in [".vcf", ".vcf.gz"]:
             # For VCF, just note that it's uploaded - actual analysis happens via /analyze
             summary = f"✅ **VCF file uploaded:** `{file.filename}`\n\nYou can now use `/analyze` to start variant classification."
+
+        elif ext == ".bam":
+            # For BAM, note it's uploaded - improves phasing accuracy
+            summary = f"✅ **BAM file uploaded:** `{file.filename}`\n\n📊 This will dramatically improve phasing accuracy for compound heterozygosity detection!"
 
         elif ext == ".txt":
             with open(filepath, "r", encoding="utf-8") as f:
@@ -180,10 +186,10 @@ async def upload_file_to_chat(
             if mode == "solo":
                 form_data["vcf_path"] = str(filepath)
                 context["state"] = "solo_vcf_uploaded"
-                # Add a helpful follow-up message
+                # Ask if they have BAM file
                 chat["messages"].append({
                     "role": "assistant",
-                    "content": "Which genome build was used?\n\n🔹 **GRCh38** (recommended)\n🔹 **GRCh37**\n\nType `38` or `37`.",
+                    "content": "Great! VCF uploaded ✅\n\n**Optional but Recommended:** Do you have a BAM file for this sample?\n\n📊 BAM files dramatically improve phasing accuracy for compound heterozygosity detection.\n\nType `yes` to upload BAM, or `no` to skip.",
                     "timestamp": _now()
                 })
             elif mode == "trio":
@@ -192,22 +198,80 @@ async def upload_file_to_chat(
                     form_data["vcf_path"] = str(filepath)
                     chat["messages"].append({
                         "role": "assistant",
-                        "content": "Great! Proband VCF uploaded ✅\n\nNow please upload **Father VCF** (parent 1).",
+                        "content": "Great! Proband VCF uploaded ✅\n\n**Optional:** Do you have a proband BAM file?\n\nBAM improves phasing accuracy. Type `yes` to upload, or `no` to continue.",
                         "timestamp": _now()
                     })
                 elif "parent1_vcf" not in form_data:
                     form_data["parent1_vcf"] = str(filepath)
                     chat["messages"].append({
                         "role": "assistant",
-                        "content": "Father VCF uploaded ✅\n\nFinally, please upload **Mother VCF** (parent 2).",
+                        "content": "Father VCF uploaded ✅\n\n**Optional:** Do you have father's BAM file?\n\nType `yes` to upload, or `no` to continue.",
                         "timestamp": _now()
                     })
                 elif "parent2_vcf" not in form_data:
                     form_data["parent2_vcf"] = str(filepath)
+                    chat["messages"].append({
+                        "role": "assistant",
+                        "content": "Mother VCF uploaded ✅\n\n**Optional:** Do you have mother's BAM file?\n\nType `yes` to upload, or `no` to skip and continue.",
+                        "timestamp": _now()
+                    })
+
+            context["form_data"] = form_data
+
+        elif ext == ".bam":
+            # Handle BAM file uploads
+            if "context" not in chat:
+                chat["context"] = {"state": "idle", "form_data": {}}
+
+            context = chat["context"]
+            form_data = context.get("form_data", {})
+            mode = form_data.get("mode", "solo")
+
+            # Store BAM file path in form_data
+            if mode == "solo":
+                form_data["proband_bam_path"] = str(filepath)
+                # Move to next step after BAM upload
+                chat["messages"].append({
+                    "role": "assistant",
+                    "content": "Perfect! BAM file uploaded ✅\n\nWhich genome build was used?\n\n🔹 **GRCh38** (recommended)\n🔹 **GRCh37**\n\nType `38` or `37`.",
+                    "timestamp": _now()
+                })
+            elif mode == "trio":
+                # Determine which BAM this is based on what's already uploaded
+                if "proband_bam_path" not in form_data:
+                    form_data["proband_bam_path"] = str(filepath)
+                    if "parent1_vcf" not in form_data:
+                        chat["messages"].append({
+                            "role": "assistant",
+                            "content": "Proband BAM uploaded ✅\n\nNow upload **Father VCF**.",
+                            "timestamp": _now()
+                        })
+                    else:
+                        chat["messages"].append({
+                            "role": "assistant",
+                            "content": "Proband BAM uploaded ✅\n\nDo you have father's BAM? Type `yes` to upload or `no` to skip.",
+                            "timestamp": _now()
+                        })
+                elif "parent2_bam_path" not in form_data:
+                    form_data["parent2_bam_path"] = str(filepath)
+                    if "parent2_vcf" not in form_data:
+                        chat["messages"].append({
+                            "role": "assistant",
+                            "content": "Father BAM uploaded ✅\n\nNow upload **Mother VCF**.",
+                            "timestamp": _now()
+                        })
+                    else:
+                        chat["messages"].append({
+                            "role": "assistant",
+                            "content": "Father BAM uploaded ✅\n\nDo you have mother's BAM? Type `yes` or `no`.",
+                            "timestamp": _now()
+                        })
+                elif "parent1_bam_path" not in form_data:
+                    form_data["parent1_bam_path"] = str(filepath)
                     context["state"] = "trio_all_vcfs_uploaded"
                     chat["messages"].append({
                         "role": "assistant",
-                        "content": "All VCF files uploaded ✅\n\nWhich genome build was used?\n\n🔹 **GRCh38** (recommended)\n🔹 **GRCh37**\n\nType `38` or `37`.",
+                        "content": "All files uploaded ✅\n\nWhich genome build?\n\n🔹 **GRCh38**\n🔹 **GRCh37**\n\nType `38` or `37`.",
                         "timestamp": _now()
                     })
 

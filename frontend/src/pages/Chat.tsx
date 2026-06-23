@@ -485,7 +485,7 @@ export default function ChatPage() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".vcf,.vcf.gz,.pdf,.csv,.txt"
+                      accept=".vcf,.vcf.gz,.bam,.pdf,.csv,.txt"
                       onChange={handleFileUpload}
                       style={{ display: 'none' }}
                     />
@@ -519,7 +519,7 @@ export default function ChatPage() {
                     </button>
                   </div>
                   <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '8px', textAlign: 'center' }}>
-                    Press Enter to send • Shift+Enter for new line • Upload VCF, PDF, CSV, or TXT files
+                    Press Enter to send • Shift+Enter for new line • Upload VCF, BAM, PDF, CSV, or TXT files
                   </p>
                 </div>
               </div>
