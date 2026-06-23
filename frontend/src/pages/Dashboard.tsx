@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import apiClient, { clearApiKey } from '@/lib/api';
 import type { DashboardStats, Session } from '@/types';
-import { BarChart, FileText, Activity, AlertCircle, Upload, LogOut, Settings } from 'lucide-react';
+import { BarChart, FileText, Activity, AlertCircle, Upload, LogOut, Settings, MessageSquare } from 'lucide-react';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -101,6 +101,10 @@ export default function Dashboard() {
               <p className="text-sm text-gray-500 dark:text-gray-400">Variant Classification Dashboard</p>
             </div>
             <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => navigate('/chat')}>
+                <MessageSquare className="h-4 w-4" />
+                <span className="mobile-hide-text ml-2">Chat</span>
+              </Button>
               <Button variant="outline" onClick={() => navigate('/settings')}>
                 <Settings className="h-4 w-4" />
                 <span className="mobile-hide-text ml-2">Settings</span>

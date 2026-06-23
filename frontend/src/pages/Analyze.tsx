@@ -224,8 +224,8 @@ export default function Analyze() {
               <div className="space-y-2">
                 <Label>Genome Build</Label>
                 <Select value={genomeBuild} onValueChange={setGenomeBuild}>
-                  <SelectTrigger>
-                    <SelectValue />
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select genome build" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="GRCh38">GRCh38 (hg38)</SelectItem>
