@@ -59,6 +59,8 @@ async def upload_file_to_chat(
     3. Summarized using LLM
     4. Summary added to chat as assistant message
     """
+    logger.info(f"Upload request received - chat_id: {chat_id}, filename: {file.filename}, content_type: {file.content_type}")
+
     # Load chat
     chat = ChatStore.load_chat(chat_id)
     if not chat:
@@ -86,8 +88,17 @@ async def upload_file_to_chat(
 
     filepath = upload_dir / f"{file_id}{ext}"
 
+    logger.info(f"Saving file to: {filepath}")
+
+    # Read file in chunks to handle large files
     with open(filepath, "wb") as f:
-        f.write(await file.read())
+        chunk_size = 1024 * 1024  # 1MB chunks
+        bytes_written = 0
+        while content := await file.read(chunk_size):
+            f.write(content)
+            bytes_written += len(content)
+
+    logger.info(f"File saved successfully. Size: {bytes_written / (1024*1024):.2f} MB")
 
     # Parse and summarize based on file type
     summary = ""
@@ -186,10 +197,10 @@ async def upload_file_to_chat(
             if mode == "solo":
                 form_data["vcf_path"] = str(filepath)
                 context["state"] = "solo_vcf_uploaded"
-                # Ask if they have BAM file
+                # For solo mode, skip BAM and go directly to genome build question
                 chat["messages"].append({
                     "role": "assistant",
-                    "content": "Great! VCF uploaded ✅\n\n**Optional but Recommended:** Do you have a BAM file for this sample?\n\n📊 BAM files dramatically improve phasing accuracy for compound heterozygosity detection.\n\nType `yes` to upload BAM, or `no` to skip.",
+                    "content": "Great! VCF uploaded ✅\n\nWhich genome build was used?\n\n🔹 **GRCh38** (recommended)\n🔹 **GRCh37**\n\nType `38` or `37`.",
                     "timestamp": _now()
                 })
             elif mode == "trio":
@@ -228,12 +239,11 @@ async def upload_file_to_chat(
             mode = form_data.get("mode", "solo")
 
             # Store BAM file path in form_data
+            # BAM files are only supported for trio mode
             if mode == "solo":
-                form_data["proband_bam_path"] = str(filepath)
-                # Move to next step after BAM upload
                 chat["messages"].append({
                     "role": "assistant",
-                    "content": "Perfect! BAM file uploaded ✅\n\nWhich genome build was used?\n\n🔹 **GRCh38** (recommended)\n🔹 **GRCh37**\n\nType `38` or `37`.",
+                    "content": "⚠️ BAM files are only supported in **Trio mode** for phasing analysis.\n\nFor solo analysis, please continue with the VCF file only.",
                     "timestamp": _now()
                 })
             elif mode == "trio":

@@ -259,7 +259,9 @@ def send_message(
         chat["title"] = req.content[:50].strip() + ("..." if len(req.content) > 50 else "")
 
     # Process user input based on chat state
-    context = chat.get("context", {})
+    if "context" not in chat:
+        chat["context"] = {"state": "idle", "form_data": {}}
+    context = chat["context"]
     state = context.get("state", "idle")
     form_data = context.get("form_data", {})
 
@@ -285,6 +287,9 @@ def send_message(
 
     chat["messages"].append(assistant_msg)
     chat["updated_at"] = now
+
+    # CRITICAL FIX: Save form_data changes back to chat context
+    chat["context"]["form_data"] = form_data
 
     # Save updated chat
     ChatStore.save_chat(req.chat_id, chat)
@@ -341,16 +346,7 @@ def _process_user_input(
             # Use LLM for general conversation
             return _call_llm(chat_history, _get_system_prompt())
 
-    elif state == "solo_vcf_uploaded":
-        # After VCF upload, ask for BAM
-        if user_lower in ["yes", "y"]:
-            return "Great! Please upload the proband BAM file using the upload button."
-        elif user_lower in ["no", "n", "skip"]:
-            # Skip BAM, move to genome build
-            return "No problem! Which genome build was used?\n\n🔹 **GRCh38** (recommended)\n🔹 **GRCh37**\n\nType `38` or `37`."
-        # If they're responding to genome build question, fall through to existing logic below
-
-    elif state == "solo_vcf_uploaded" or state == "trio_all_vcfs_uploaded":
+    if state == "solo_vcf_uploaded" or state == "trio_all_vcfs_uploaded":
         # Ask for genome build
         if "genome_build" not in form_data:
             # Check if user provided it
