@@ -150,6 +150,8 @@ services:
       --port 8080
       --reload
       --reload-dir /app/src
+      --limit-max-requests 0
+      --timeout-keep-alive 300
 
   # -------------------------------------------------------------------------
   # Flower — Celery job monitoring dashboard (dev only)

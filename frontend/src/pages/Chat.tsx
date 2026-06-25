@@ -116,13 +116,24 @@ export default function ChatPage() {
       formData.append('chat_id', selectedChatId);
       formData.append('file', file);
 
+      // Log file size for debugging
+      console.log(`Uploading file: ${file.name}, Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+
       await apiClient.post('/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000, // 5 minutes for large files
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            console.log(`Upload progress: ${percentCompleted}%`);
+          }
+        },
       });
 
       queryClient.invalidateQueries({ queryKey: ['chat', selectedChatId] });
-    } catch (err) {
+    } catch (err: any) {
       console.error('File upload failed:', err);
+      alert(`File upload failed: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`);
     } finally {
       setUploadingFile(false);
       if (fileInputRef.current) {
