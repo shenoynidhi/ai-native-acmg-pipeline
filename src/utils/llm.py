@@ -40,6 +40,20 @@ def _get_client():
             logger.warning("Falling back to legacy vLLM client")
             provider = "vllm"
 
+    if provider == "medgemma":
+        try:
+            from src.utils.medgemma_client import call_medgemma, call_medgemma_json
+
+            def call_llm_wrapper(system_prompt, user_prompt, max_tokens=4096,
+                                temperature=0.2, **kwargs):
+                return call_medgemma(system_prompt, user_prompt, temperature, max_tokens)
+
+            logger.info("Using MedGemma for LLM calls")
+            return call_llm_wrapper, call_medgemma_json
+        except ImportError as e:
+            logger.error(f"Failed to import MedGemma client: {e}")
+            raise
+
     if provider == "vllm":
         try:
             from src.utils.llm_client import call_llm, call_llm_json
@@ -64,8 +78,10 @@ def call_llm(
     system_prompt: str,
     user_prompt: str,
     max_tokens: int = 1000,
-    temperature: float = 0.1,
+    temperature: float = 0.0,
     retries: int = 3,
+    reasoning_effort: str = None,
+    max_thinking_tokens: int = None,
 ) -> str:
     """
     Call LLM with system + user prompts.
@@ -92,7 +108,9 @@ def call_llm(
         user_prompt=user_prompt,
         max_tokens=max_tokens,
         temperature=temperature,
-        retries=retries
+        retries=retries,
+        reasoning_effort=reasoning_effort,
+        max_thinking_tokens=max_thinking_tokens
     )
 
 
@@ -100,7 +118,11 @@ def call_llm_json(
     system_prompt: str,
     user_prompt: str,
     max_tokens: int = 1000,
-    temperature: float = 0.1,
+    temperature: float = 0.0,
+    model_override: str = None,
+    reasoning_effort: str = None,
+    max_thinking_tokens: int = None,
+    debug_dump: bool = False,
 ) -> Dict:
     """
     Call LLM and parse response as JSON.
@@ -112,6 +134,8 @@ def call_llm_json(
         user_prompt: User message with task/question
         max_tokens: Maximum tokens to generate
         temperature: Sampling temperature
+        model_override: Override default model (e.g., "openai.gpt-oss-20b-1.0")
+        debug_dump: Enable raw output dump for debugging
 
     Returns:
         Parsed JSON dict (empty dict {} on parse failure)
@@ -120,7 +144,8 @@ def call_llm_json(
         result = call_llm_json(
             system_prompt="Return JSON only.",
             user_prompt='Classify variant. Format: {"classification": "VUS"}',
-            temperature=0.0
+            temperature=0.0,
+            model_override="openai.gpt-oss-20b-1.0"
         )
         print(result["classification"])
     """
@@ -128,5 +153,10 @@ def call_llm_json(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         max_tokens=max_tokens,
-        temperature=temperature
+        temperature=temperature,
+        model_override=model_override,
+        reasoning_effort=reasoning_effort,
+        max_thinking_tokens=max_thinking_tokens,
+        debug_dump=debug_dump
     )
+

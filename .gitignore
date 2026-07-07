@@ -1,11 +1,11 @@
 .env
 .env.*
-data/output/
-data/chromadb/
+.env.aws
 logs/
 *.log
 __pycache__/
 *.pyc
-data/reference/
-data/databases/
 .nfs*
+tests/
+data/
+debug_llm_outputs/

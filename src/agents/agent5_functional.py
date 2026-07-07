@@ -50,7 +50,7 @@ from typing import Optional
 
 from src.pipeline.state import VariantState
 from src.rag.retriever import query_uniprot_domains
-from src.utils.llm_client import call_llm_json
+from src.utils.llm_client import call_llm_json  # CONVERSE API: reasoning support
 from src.pipeline.pubmed import pubmed_search, pubmed_format_for_llm
 
 logger = get_user_friendly_logger('agent5_functional')
@@ -374,7 +374,13 @@ Evaluate:
 3. PM1: Confirm or adjust whether this position is in a critical domain.
    Consider whether benign missense variants are absent from this domain in gnomAD.
 """
-    return call_llm_json(system_prompt=_SYSTEM_PROMPT, user_prompt=user_prompt)
+    return call_llm_json(
+        system_prompt=_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        model_override="openai.gpt-oss-20b-1:0",  # GPT-OSS 20B
+        reasoning_effort="medium",  # REASONING HIGH: complex PubMed parsing, highest failure rate (2.5%)
+        max_tokens=4096
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -537,3 +543,4 @@ def agent5_functional(state: VariantState) -> dict:
             }
         }
     }
+

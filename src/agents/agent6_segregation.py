@@ -388,7 +388,11 @@ Be explicit about what cannot be determined due to missing parental phenotype da
 In trio mode without phenotype confirmation, use Supporting strength only for
 PP1 and BS4."""
 
-    return call_llm_json(system_prompt=_SYSTEM_PROMPT, user_prompt=user_prompt)
+    return call_llm_json(
+        system_prompt=_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        model_override="openai.gpt-oss-20b-1:0"  # Correct format with colon
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -516,4 +520,5 @@ def agent6_segregation(state: VariantState) -> dict:
             }
         }
     }
+
 

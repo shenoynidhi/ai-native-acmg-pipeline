@@ -22,10 +22,34 @@ from dotenv import load_dotenv
 
 # Load .env from project root — works on pod and locally.
 # In Docker, env vars are injected directly so .env is ignored.
-load_dotenv(Path(__file__).parent.parent / ".env")
+# Try .env.aws first (AWS deployment), fallback to .env (local dev)
+env_aws = Path(__file__).parent.parent / ".env.aws"
+env_default = Path(__file__).parent.parent / ".env"
+if env_aws.exists():
+    load_dotenv(env_aws)
+else:
+    load_dotenv(env_default)
 
 # Suppress ChromaDB telemetry errors (cosmetic stderr noise from version mismatch)
-os.environ["CHROMA_TELEMETRY"] = "0"
+os.environ["CHROMA_TELEMETRY"] = "false"
+os.environ["ANONYMIZED_TELEMETRY"] = "false"
+
+# Set HuggingFace cache directories BEFORE any sentence-transformers imports
+# This prevents re-downloading models on every agent run
+SENTENCE_TRANSFORMERS_HOME = os.getenv(
+    "SENTENCE_TRANSFORMERS_HOME",
+    str(Path(__file__).parent.parent / "models" / "sentence-transformers")
+)
+TRANSFORMERS_CACHE = os.getenv(
+    "TRANSFORMERS_CACHE",
+    str(Path(__file__).parent.parent / "models" / "transformers")
+)
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = SENTENCE_TRANSFORMERS_HOME
+os.environ["TRANSFORMERS_CACHE"] = TRANSFORMERS_CACHE
+
+# Create cache directories if they don't exist
+Path(SENTENCE_TRANSFORMERS_HOME).mkdir(parents=True, exist_ok=True)
+Path(TRANSFORMERS_CACHE).mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Base directories — all overridable via environment variables
@@ -75,10 +99,6 @@ LLM_API_KEY:  str = os.getenv("LLM_API_KEY",  "dummy")
 # ---------------------------------------------------------------------------
 # Speed Optimization Flags
 # ---------------------------------------------------------------------------
-# Use rule-based (deterministic) agents instead of LLM where possible
-# Agents 1, 3, 7 have 100% deterministic rules → faster + more accurate
-USE_RULE_BASED_AGENTS: bool = os.getenv("USE_RULE_BASED_AGENTS", "true").lower() == "true"
-
 # Cache HPO NLP results (same clinical notes → same HPO terms)
 CACHE_HPO_NLP: bool = os.getenv("CACHE_HPO_NLP", "true").lower() == "true"
 
@@ -218,16 +238,16 @@ def get_database_paths(genome_build: str = "GRCh38") -> dict:
             else _vep_path("dbnsfp", b, "dbNSFP5.3.1a_grch38.gz.tbi")
         ),
 
-        # --- gnomAD tabbed ---------------------------------------------------
-        "gnomad_tabbed": (
-            _vep_path("gnomad", b, "gnomad.genomes.tabbed.tsv.gz")
+        # --- gnomAD VCF (sites-only, for population frequencies) -------------
+        "gnomad_vcf": (
+            _vep_path("gnomad", b, "vcf/gnomad.genomes.r2.1.1.sites.all_chr.vcf.gz")
             if b.upper() == "GRCH37"
-            else _vep_path("gnomad", b, "gnomad.ch.genomesv3.tabbed.tsv.gz")
+            else _vep_path("gnomad", b, "vcf/gnomad.genomes.v4.1.sites.all_chr.vcf.gz")
         ),
-        "gnomad_tabbed_tbi": (
-            _vep_path("gnomad", b, "gnomad.genomes.tabbed.tsv.gz.tbi")
+        "gnomad_vcf_tbi": (
+            _vep_path("gnomad", b, "vcf/gnomad.genomes.r2.1.1.sites.all_chr.vcf.gz.tbi")
             if b.upper() == "GRCH37"
-            else _vep_path("gnomad", b, "gnomad.ch.genomesv3.tabbed.tsv.gz.tbi")
+            else _vep_path("gnomad", b, "vcf/gnomad.genomes.v4.1.sites.all_chr.vcf.gz.tbi")
         ),
 
         # --- SpliceAI --------------------------------------------------------
@@ -258,7 +278,7 @@ def get_database_paths(genome_build: str = "GRCh38") -> dict:
         "loftee_gerp": (
             _vep_path("loftee", b, "GERP_scores.final.sorted.txt.gz")
             if b.upper() == "GRCH37"
-            else _vep_path("loftee", b, "gerp_conservation_scores.homo_sapiens.GRCh38.bw")
+            else _vep_path("loftee", b, "gerp.tsv.gz")  # Use gerp_file parameter (not gerp_bigwig)
         ),
 
         # --- VEP plugins dir (build-agnostic) --------------------------------

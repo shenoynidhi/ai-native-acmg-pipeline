@@ -10,8 +10,11 @@ import json
 import logging
 import subprocess
 import traceback
+import time
 from datetime import datetime
 from pathlib import Path
+from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from celery import Celery
 from sqlalchemy.orm import Session
 import redis
@@ -71,12 +74,12 @@ def _ensure_vcf_indexed(vcf_path: str) -> None:
     tbi_file = Path(vcf_path + ".tbi")
     csi_file = Path(vcf_path + ".csi")
 
-    # Check if already indexed
+    # ⭐ CHECK: Skip if already indexed
     if tbi_file.exists() or csi_file.exists():
-        logger.info(f"VCF index already exists: {vcf_path}")
+        logger.info(f"✓ VCF index exists: {vcf_file.name}")
         return
 
-    logger.info(f"Creating tabix index for {vcf_path}")
+    logger.info(f"Creating tabix index for {vcf_file.name}...")
 
     try:
         # Use tabix to create index
@@ -89,7 +92,7 @@ def _ensure_vcf_indexed(vcf_path: str) -> None:
         )
 
         if tbi_file.exists():
-            logger.info(f"✓ Successfully created index: {tbi_file}")
+            logger.info(f"✓ Successfully created index: {tbi_file.name}")
         else:
             logger.warning(f"tabix completed but no .tbi file found for {vcf_path}")
 
@@ -110,6 +113,114 @@ def _ensure_vcf_indexed(vcf_path: str) -> None:
         )
     except Exception as e:
         logger.warning(f"Unexpected error during indexing (non-fatal): {e}")
+
+
+def _ensure_bam_indexed(bam_path: str, threads: int = 8) -> None:
+    """
+    Ensure BAM file has index (.bai).
+    Creates index if missing using multi-threaded samtools.
+
+    Args:
+        bam_path: Path to .bam file
+        threads: Number of threads for samtools index (default: 8)
+
+    Raises:
+        RuntimeError: If indexing fails (hard failure - pipeline stops)
+    """
+    if not bam_path or not bam_path.endswith('.bam'):
+        return
+
+    bam_file = Path(bam_path)
+    if not bam_file.exists():
+        raise RuntimeError(f"BAM file not found: {bam_path}")
+
+    bai_file = Path(bam_path + ".bai")
+
+    # ⭐ CHECK: Skip if already indexed (INSTANT for re-runs!)
+    if bai_file.exists():
+        logger.info(f"✓ BAM index exists: {bam_file.name}")
+        return
+
+    # BAM file exists but no index - create it
+    logger.info(f"Creating BAM index for {bam_file.name} (using {threads} threads)...")
+    start_time = time.time()
+
+    try:
+        result = subprocess.run(
+            ["samtools", "index", "-@", str(threads), str(bam_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3600  # 1 hour max for very large BAMs
+        )
+
+        elapsed = time.time() - start_time
+        logger.info(f"✓ Indexed {bam_file.name} in {elapsed:.1f}s")
+
+        if not bai_file.exists():
+            raise RuntimeError(
+                f"samtools index completed but no .bai file created for {bam_file.name}"
+            )
+
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"BAM indexing failed for {bam_file.name}:\n{e.stderr}\n\n"
+            f"Please index manually before upload:\n"
+            f"  samtools index {bam_path}"
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"BAM indexing timed out for {bam_file.name} (>1 hour)\n"
+            f"BAM file may be too large. Please index manually:\n"
+            f"  samtools index -@ 8 {bam_path}"
+        )
+    except FileNotFoundError:
+        raise RuntimeError(
+            f"samtools not found in PATH.\n"
+            f"Install with: conda install -c bioconda samtools\n"
+            f"Or index manually and upload .bai file alongside BAM."
+        )
+
+
+def _index_all_bams_parallel(bam_paths: List[str], session_id: str = None) -> None:
+    """
+    Index multiple BAM files in parallel using ThreadPoolExecutor.
+    This allows trio BAMs to be indexed simultaneously (wall-clock time ≈ single BAM).
+
+    Args:
+        bam_paths: List of BAM file paths (can contain None values - will be filtered)
+        session_id: Optional session ID for logging
+
+    Raises:
+        RuntimeError: If any BAM indexing fails
+    """
+    # Filter out None/empty paths and non-existent files
+    valid_bams = [p for p in bam_paths if p and Path(p).exists()]
+
+    if not valid_bams:
+        logger.debug(f"[{session_id}] No BAM files to index")
+        return
+
+    logger.info(f"[{session_id}] Indexing {len(valid_bams)} BAM file(s) in parallel...")
+
+    # Parallel indexing: all BAMs indexed simultaneously
+    # Each BAM uses 8 threads, so 3 BAMs = 24 cores max (acceptable on 32-core instance)
+    with ThreadPoolExecutor(max_workers=len(valid_bams)) as executor:
+        # Submit all indexing jobs
+        futures = {
+            executor.submit(_ensure_bam_indexed, bam, threads=8): bam
+            for bam in valid_bams
+        }
+
+        # Wait for completion and check for errors
+        for future in as_completed(futures):
+            bam = futures[future]
+            try:
+                future.result()  # Raises exception if indexing failed
+            except Exception as e:
+                # Hard failure - stop pipeline
+                logger.error(f"[{session_id}] Failed to index {Path(bam).name}: {e}")
+                raise
 
 
 def update_session_status(
@@ -177,6 +288,22 @@ def analyze_variant_task(self, session_id: str, vcf_path: str, params: dict):
         if params.get("parent2_vcf_path"):
             _ensure_vcf_indexed(params["parent2_vcf_path"])
 
+        # Index all BAM files in parallel (if provided)
+        bam_paths = [
+            params.get("proband_bam_path"),
+            params.get("parent1_bam_path"),
+            params.get("parent2_bam_path")
+        ]
+        if any(bam_paths):
+            update_session_status(
+                db, session_id,
+                status="running",
+                progress_pct=2,
+                current_step="Indexing BAM files..."
+            )
+            logger.info(f"[{session_id}] Checking BAM indexes...")
+            _index_all_bams_parallel(bam_paths, session_id=session_id)
+
         # Update status to running
         update_session_status(
             db, session_id,
@@ -226,9 +353,14 @@ def analyze_variant_task(self, session_id: str, vcf_path: str, params: dict):
                 system_ncbi_key = os.getenv("SYSTEM_NCBI_API_KEY", "")
                 if system_ncbi_key:
                     os.environ["NCBI_API_KEY"] = system_ncbi_key
+                    logger.info(f"[{session_id}] Using system-wide NCBI API key")
                 else:
                     # No key available - pubmed will use no-key rate limit (3 req/sec)
-                    logger.debug(f"[{session_id}] No NCBI API key - using public rate limit")
+                    logger.warning(
+                        f"[{session_id}] No NCBI API key configured - PubMed rate limited to 3 req/sec. "
+                        f"Set SYSTEM_NCBI_API_KEY in .env.aws or provide ncbi_api_key during user registration. "
+                        f"Get a free key at: https://www.ncbi.nlm.nih.gov/account/"
+                    )
                     os.environ["NCBI_API_KEY"] = ""
 
         # Run the pipeline with progress callback
@@ -274,6 +406,19 @@ def analyze_variant_task(self, session_id: str, vcf_path: str, params: dict):
             report_paths=report_paths,
             classifications=classifications
         )
+
+        # Finalize token usage tracking
+        try:
+            from src.utils.token_tracker import finalize_session
+            token_summary = finalize_session(session_id)
+            if token_summary:
+                logger.info(
+                    f"[{session_id}] Token usage: {token_summary['total_tokens']} total "
+                    f"({token_summary['total_input_tokens']} input, "
+                    f"{token_summary['total_output_tokens']} output)"
+                )
+        except Exception as e:
+            logger.warning(f"[{session_id}] Failed to finalize token tracking: {e}")
 
         # Store in MemPalace (get user_id from session)
         db_session = db.query(DBSession).filter(DBSession.session_id == session_id).first()
@@ -386,4 +531,5 @@ if __name__ == "__main__":
     # Run with: celery -A src.api.worker worker --loglevel=info
     print("Celery worker for ACMG Pipeline")
     print(f"Broker: {REDIS_URL}")
+
 

@@ -41,6 +41,27 @@ State fields WRITTEN:
   unevaluated_criteria_report:    list  (criteria skipped due to missing input)
 """
 
+# CRITICAL: Ensure environment is loaded BEFORE sentence-transformers import
+import os
+from pathlib import Path
+
+# Set cache directories early if not already set
+if "SENTENCE_TRANSFORMERS_HOME" not in os.environ:
+    from dotenv import load_dotenv
+    env_aws = Path(__file__).parent.parent.parent.parent / ".env.aws"
+    env_default = Path(__file__).parent.parent.parent.parent / ".env"
+    if env_aws.exists():
+        load_dotenv(env_aws)
+    else:
+        load_dotenv(env_default)
+
+    SENTENCE_TRANSFORMERS_HOME = os.getenv("SENTENCE_TRANSFORMERS_HOME")
+    TRANSFORMERS_CACHE = os.getenv("TRANSFORMERS_CACHE")
+    if SENTENCE_TRANSFORMERS_HOME:
+        os.environ["SENTENCE_TRANSFORMERS_HOME"] = SENTENCE_TRANSFORMERS_HOME
+    if TRANSFORMERS_CACHE:
+        os.environ["TRANSFORMERS_CACHE"] = TRANSFORMERS_CACHE
+
 import json
 import logging
 from src.utils.logging_config import get_user_friendly_logger
@@ -50,7 +71,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 
 from src.pipeline.state import VariantState
-from src.utils.llm_client import call_llm_json
+from src.utils.llm_client import call_llm_json  # invoke_model with reasoning support
 from src.config import CHROMADB_DIR
 
 logger = get_user_friendly_logger('final_arbiter')
@@ -118,9 +139,9 @@ def _query_acmg_guidelines_arbiter(
 def _build_system_prompt(guideline_chunks: list[str]) -> str:
     guidelines_text = "\n\n---\n\n".join(guideline_chunks) if guideline_chunks else "No guideline context retrieved."
 
-    return f"""You are a senior clinical laboratory director making the final ACMG/AMP 2015
+    return f"""You are a senior clinical genetic counsellor making the final ACMG/AMP 2015
 variant classification decision after reviewing arguments from both a pathogenic
-advocate and a benign advocate.
+advocate and a benign advocate for a variant.
 
 Your responsibilities:
 1. Review both advocate arguments objectively. Accept or reject each proposed
@@ -150,7 +171,10 @@ Your responsibilities:
 ACMG GUIDELINE REFERENCE (retrieved for all criteria active in this debate):
 {guidelines_text}
 
-Output format — respond with valid JSON only, no markdown:
+CRITICAL: Respond with JSON ONLY. Do NOT wrap your response in <reasoning> tags.
+Do NOT output thinking or explanation before the JSON. Output the JSON directly.
+
+Output format:
 {{
   "final_classification": "Pathogenic|Likely_Pathogenic|VUS|Likely_Benign|Benign",
   "final_criteria_applied": ["criterion:strength", ...],
@@ -308,8 +332,17 @@ def debate_final_arbiter_node(state: VariantState) -> dict:
     system_prompt = _build_system_prompt(guideline_chunks)
     user_prompt   = _build_user_prompt(state)
 
-    # Increase max_tokens to prevent JSON truncation (default 1000 → 2048)
-    raw_result = call_llm_json(system_prompt, user_prompt, max_tokens=2048)
+    # Use GPT-OSS-20B for reliable JSON output
+    # CRITICAL: Do NOT use reasoning_effort parameter - it forces model to wrap
+    # ALL output in <reasoning> tags, preventing JSON extraction
+    # Without reasoning_effort, model outputs JSON directly (like Agent 5)
+    raw_result = call_llm_json(
+        system_prompt,
+        user_prompt,
+        max_tokens=6000,  # INCREASED: arbiter needs more tokens for complex synthesis
+        model_override="google.gemma-3-12b-it"
+        # NO reasoning_effort - causes reasoning tag wrapper that breaks parsing
+    )
 
     result = _validate_arbiter_output(raw_result, state, variant_id)
 

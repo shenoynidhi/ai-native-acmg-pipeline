@@ -38,9 +38,13 @@ import logging
 from src.utils.logging_config import get_user_friendly_logger
 from typing import Optional
 from src.pipeline.state import VariantState
-from src.utils.llm_client import call_llm_json
+from src.utils.llm_client import call_llm_json  # CONVERSE API: reasoning support
+from src.utils.orinn_client import call_orinn_json
 
 logger = get_user_friendly_logger('agent9_phenotype')
+
+# HPO term extraction thresholds
+MIN_HPO_TERMS_FOR_PRIMARY = 5  # If < 5 HPO terms found, fallback to ORINN
 
 # Thresholds
 PP4_PHENOTYPE_SCORE_THRESHOLD = 0.6   # phenotype_score >= this → PP4 candidate
@@ -228,7 +232,56 @@ Evaluate PP4 only. Confirm or correct the rule-based PP4 assignment.
 Consider whether the phenotype is specific enough for a single-gene disorder.
 Note if the HPO terms are hallmark features of the gene's disease."""
 
-    return call_llm_json(system_prompt=_SYSTEM_PROMPT, user_prompt=user_prompt)
+    # Try primary model first (openai.gpt-oss-20b-1.0)
+    result = call_llm_json(
+        system_prompt=_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        model_override="openai.gpt-oss-20b-1:0",  # GPT-OSS 20B
+        reasoning_effort="medium",  # REASONING: HPO semantic matching, phenotype overlap
+        max_tokens=4096
+    )
+
+    # Check if insufficient HPO terms extracted → fallback to ORINN
+    if result and not result.get("error"):
+        # Count HPO terms in patient data
+        hpo_count = len(state.get("patient_hpo_terms") or [])
+
+        if hpo_count < MIN_HPO_TERMS_FOR_PRIMARY:
+            logger.warning(
+                f"Only {hpo_count} HPO terms extracted by primary model. "
+                f"Falling back to ORINN for medical-specific NLP."
+            )
+            # Try ORINN fallback
+            orinn_result = call_orinn_json(
+                system_prompt=_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.0,
+            )
+
+            if orinn_result and not orinn_result.get("error"):
+                logger.info("ORINN fallback successful - using ORINN result")
+                return orinn_result
+            else:
+                logger.warning("ORINN fallback also failed - using primary model result")
+                return result
+
+        return result
+
+    # Primary model failed → try ORINN fallback
+    logger.warning("Primary model failed - falling back to ORINN")
+    orinn_result = call_orinn_json(
+        system_prompt=_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        temperature=0.0,
+    )
+
+    if orinn_result and not orinn_result.get("error"):
+        logger.info("ORINN fallback successful after primary model failure")
+        return orinn_result
+
+    # Both failed
+    logger.error("Both primary model and ORINN fallback failed")
+    return result if result else {"error": "Both models failed"}
 
 
 # ---------------------------------------------------------------------------
@@ -315,3 +368,4 @@ def agent9_phenotype(state: VariantState) -> dict:
             }
         }
     }
+

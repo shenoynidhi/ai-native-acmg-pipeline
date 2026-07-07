@@ -41,8 +41,9 @@ from pathlib import Path
 from typing import Optional
 
 from src.pipeline.state import VariantState
-from src.rag.retriever import query_clinvar_by_variant, query_clinvar_same_codon
-from src.utils.llm_client import call_llm_json
+# Use Parquet for 100-500× faster ClinVar lookups
+from src.rag.parquet_retriever import query_clinvar_by_variant, query_clinvar_same_codon
+from src.utils.llm_client import call_llm_json  # CONVERSE API: reasoning support
 from src.utils.disease_matcher import diseases_match, get_disease_match_confidence
 from src.pipeline.pubmed import pubmed_search, pubmed_format_for_llm
 from src.utils.case_control import load_case_database, evaluate_ps4
@@ -170,17 +171,17 @@ def _evaluate_ps1_from_rag(
     notes = []
     same_aa_hits = [
         h for h in rag_hits
-        if _is_pathogenic(h["metadata"].get("clnsig", "")) and
-           h["metadata"].get("stars", 0) >= 2 and
-           _same_aa_change(hgvsp, h["text"])
+        if _is_pathogenic(h.get("clnsig", "")) and
+           h.get("stars", 0) >= 2 and
+           _same_aa_change(hgvsp, h.get("hgvs", ""))
     ]
 
     if not same_aa_hits:
         return None, []
 
-    best = max(same_aa_hits, key=lambda h: h["metadata"].get("stars", 0))
-    stars = best["metadata"].get("stars", 0)
-    clinvar_disease = best["metadata"].get("clndn", "")
+    best = max(same_aa_hits, key=lambda h: h.get("stars", 0))
+    stars = best.get("stars", 0)
+    clinvar_disease = best.get("clndn", "")
 
     # Base strength from ClinVar stars
     base_strength = "Strong" if stars >= 3 else "Moderate"
@@ -196,7 +197,7 @@ def _evaluate_ps1_from_rag(
             strength = base_strength
             notes.append(
                 f"PS1 ({strength}): Same amino acid change as ClinVar P/LP variant "
-                f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
+                f"({best.get('chrom')}:{best.get('pos')}, "
                 f"{stars} stars). HGVSp={hgvsp}. "
                 f"ClinVar disease '{clinvar_disease}' matches patient disease "
                 f"'{matched_orphanet_disease}' (similarity={similarity:.2f}). "
@@ -207,7 +208,7 @@ def _evaluate_ps1_from_rag(
             strength = "Moderate" if base_strength == "Strong" else "Supporting"
             notes.append(
                 f"PS1 ({strength}, with caution): Same amino acid change as ClinVar P/LP variant "
-                f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
+                f"({best.get('chrom')}:{best.get('pos')}, "
                 f"{stars} stars). HGVSp={hgvsp}. "
                 f"⚠️ Disease mismatch: ClinVar reports pathogenic for '{clinvar_disease}' "
                 f"but patient has '{matched_orphanet_disease}' (similarity={similarity:.2f}). "
@@ -218,7 +219,7 @@ def _evaluate_ps1_from_rag(
         strength = base_strength
         notes.append(
             f"PS1 ({strength}): Same amino acid change as ClinVar P/LP variant "
-            f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
+            f"({best.get('chrom')}:{best.get('pos')}, "
             f"{stars} stars) for '{clinvar_disease}'. HGVSp={hgvsp}. "
             f"Patient disease not provided - unable to cross-validate disease context."
         )
@@ -227,7 +228,7 @@ def _evaluate_ps1_from_rag(
         strength = base_strength
         notes.append(
             f"PS1 ({strength}): Same amino acid change as ClinVar P/LP variant "
-            f"({best['metadata'].get('chrom')}:{best['metadata'].get('pos')}, "
+            f"({best.get('chrom')}:{best.get('pos')}, "
             f"{stars} stars). HGVSp={hgvsp}. "
             f"Disease context unavailable - classification based on variant identity only."
         )
@@ -374,10 +375,9 @@ def _llm_refine(
     # Summarise top RAG hits for LLM context
     hit_summaries = []
     for h in rag_hits[:8]:
-        m = h["metadata"]
         hit_summaries.append(
-            f"  {m.get('chrom')}:{m.get('pos')} {m.get('ref')}>{m.get('alt')} "
-            f"| {m.get('clnsig')} | {m.get('stars')} stars | gene={m.get('gene')}"
+            f"  {h.get('chrom')}:{h.get('pos')} {h.get('ref')}>{h.get('alt')} "
+            f"| {h.get('clnsig')} | {h.get('stars')} stars | gene={h.get('gene')}"
         )
     pubmed_section = pubmed_format_for_llm(pubmed_hits)
     user_prompt = f"""Evaluate database/prior classification evidence for this variant:
@@ -410,7 +410,14 @@ Please evaluate PS1, PS4, PP5, and BP6. Be conservative:
 - Only assign PP5/BP6 if ClinVar stars ≥2 for THIS specific variant
 - Flag conflicting_evidence=true if you see both P and B evidence
 """
-    return call_llm_json(system_prompt=_SYSTEM_PROMPT, user_prompt=user_prompt)
+    return call_llm_json(
+        system_prompt=_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        model_override="openai.gpt-oss-20b-1:0",  # GPT-OSS 20B
+        reasoning_effort="medium",  # REASONING: disease matching, ClinVar interpretation
+        max_tokens=4096,
+        debug_dump=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -462,10 +469,12 @@ def agent4_database(state: VariantState) -> dict:
     hgvsp       = state.get("hgvsp")
 
     rag_hits = []
+    genome_build = state.get("genome_build", "GRCh38")
     try:
         rag_hits = query_clinvar_by_variant(
             chrom=chrom, pos=pos, ref=ref, alt=alt,
             gene=gene, n_results=15,
+            genome_build=genome_build,
         )
         logger.debug(f" RAG returned {len(rag_hits)} ClinVar hits for {variant_id}")
     except Exception as e:
@@ -509,7 +518,7 @@ def agent4_database(state: VariantState) -> dict:
 
     # --- Step 5: LLM refinement ---
     # Call LLM when: no ClinVar direct hit, conflicting signals, or RAG has high-star hits
-    high_star_hits = [h for h in rag_hits if h["metadata"].get("stars", 0) >= 3]
+    high_star_hits = [h for h in rag_hits if h.get("stars", 0) >= 3]
     needs_llm = (
         not clnsig or                           # not in ClinVar directly
         _is_conflicting(clnsig or "") or        # conflicting interpretations
@@ -589,4 +598,5 @@ def _parse_variant_id(variant_id: str) -> tuple[str, int, str, str]:
         return chrom, pos, ref, alt
     except Exception:
         return "chrUnknown", 0, "N", "N"
+
 

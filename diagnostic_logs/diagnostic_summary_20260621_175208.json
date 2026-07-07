@@ -1,0 +1,267 @@
+{
+  "timestamp": "20260621_175208",
+  "tests": {
+    "Environment": [
+      {
+        "name": "Python Version",
+        "passed": true,
+        "warning": false,
+        "message": "Python 3.11.15",
+        "details": {
+          "version": "3.11.15"
+        }
+      },
+      {
+        "name": "Python Packages",
+        "passed": false,
+        "warning": false,
+        "message": "3 packages missing: python-dotenv, langchain, biopython",
+        "details": {
+          "fastapi": "\u2705 Installed",
+          "uvicorn": "\u2705 Installed",
+          "celery": "\u2705 Installed",
+          "redis": "\u2705 Installed",
+          "sqlalchemy": "\u2705 Installed",
+          "psycopg2": "\u2705 Installed",
+          "pydantic": "\u2705 Installed",
+          "python-dotenv": "\u274c Missing",
+          "bcrypt": "\u2705 Installed",
+          "chromadb": "\u2705 Installed",
+          "langchain": "\u274c Missing",
+          "langgraph": "\u2705 Installed",
+          "sentence_transformers": "\u2705 Installed",
+          "torch": "\u2705 Installed",
+          "pandas": "\u2705 Installed",
+          "numpy": "\u2705 Installed",
+          "cyvcf2": "\u2705 Installed",
+          "pysam": "\u2705 Installed",
+          "biopython": "\u274c Missing",
+          "requests": "\u2705 Installed",
+          "jinja2": "\u2705 Installed",
+          "openpyxl": "\u2705 Installed"
+        }
+      },
+      {
+        "name": "System Binaries",
+        "passed": true,
+        "warning": false,
+        "message": "All 7 binaries found",
+        "details": {
+          "bcftools": "\u2705 bcftools 1.21",
+          "samtools": "\u2705 samtools 1.21",
+          "tabix": "\u2705 tabix (htslib) 1.21",
+          "bgzip": "\u2705 bgzip (htslib) 1.21",
+          "perl": "\u2705 ",
+          "psql": "\u2705 psql (PostgreSQL) 18.4 (Ubuntu 18.4-0ubuntu0.26.04.1)",
+          "redis-cli": "\u2705 redis-cli 8.0.5"
+        }
+      },
+      {
+        "name": "VEP Installation",
+        "passed": true,
+        "warning": false,
+        "message": "VEP installed with 2 cache(s)",
+        "details": {
+          "vep_binary": "/usr/local/bin/vep-docker",
+          "vep_data_dir": "/mnt/ebs-databases/vep_databases",
+          "cache_versions": [
+            "115_GRCh37",
+            "115_GRCh38"
+          ]
+        }
+      }
+    ],
+    "Database": [
+      {
+        "name": "PostgreSQL Connection",
+        "passed": true,
+        "warning": false,
+        "message": "Connected successfully with pgvector",
+        "details": {
+          "database_url": "localhost:5432/acmg_pipeline",
+          "version": "PostgreSQL 18.4 (Ubuntu 18.4-0ubuntu0.26.04.1) on x86_64-pc-linux-gnu",
+          "pgvector": "\u2705 Installed"
+        }
+      },
+      {
+        "name": "Redis Connection",
+        "passed": true,
+        "warning": false,
+        "message": "Connected successfully",
+        "details": {
+          "redis_url": "redis://localhost:6379/0",
+          "version": "8.0.5",
+          "uptime_days": 0,
+          "connected_clients": 15,
+          "used_memory_human": "1.36M"
+        }
+      },
+      {
+        "name": "Database Tables",
+        "passed": true,
+        "warning": false,
+        "message": "All required tables exist",
+        "details": {
+          "users": "\u2705 2 rows",
+          "sessions": "\u2705 4 rows",
+          "palace_memories": "\u2705 4 rows",
+          "palace_knowledge": "\u2705 54 rows"
+        }
+      }
+    ],
+    "File System": [
+      {
+        "name": "Data Directories",
+        "passed": true,
+        "warning": false,
+        "message": "All directories exist and writable",
+        "details": {
+          "DATABASE_DIR": "\u2705 /mnt/ebs-databases/databases (writable)",
+          "CHROMADB_DIR": "\u2705 /mnt/ebs-databases/chromadb (writable)",
+          "OUTPUT_DIR": "\u2705 /mnt/ebs-databases/output (writable)",
+          "REFERENCE_DIR": "\u2705 /mnt/ebs-databases/reference (writable)",
+          "VEP_DATA_DIR": "\u2705 /mnt/ebs-databases/vep_databases (writable)"
+        }
+      },
+      {
+        "name": "Reference Databases",
+        "passed": false,
+        "warning": false,
+        "message": "4 files missing: HPO, gnomAD Constraint, ClinGen, HGNC",
+        "details": {
+          "HPO": "\u274c phenotype.hpoa (not found)",
+          "gnomAD Constraint": "\u274c gnomad.v2.1.1.lof_metrics.by_gene.txt (not found)",
+          "ClinGen": "\u274c ClinGen_gene_curation_list_GRCh38.tsv (not found)",
+          "HGNC": "\u274c hgnc_complete_set.txt (not found)"
+        }
+      },
+      {
+        "name": "ChromaDB Collections",
+        "passed": false,
+        "warning": false,
+        "message": "3 collections missing: clinvar_pathogenic, clinvar_benign, uniprot_domains",
+        "details": {
+          "acmg_guidelines": "\u2705 30 documents",
+          "clinvar_pathogenic": "\u274c Not found",
+          "clinvar_benign": "\u274c Not found",
+          "uniprot_domains": "\u274c Not found"
+        }
+      }
+    ],
+    "AWS Bedrock": [
+      {
+        "name": "Configuration",
+        "passed": true,
+        "warning": false,
+        "message": "Configured for nemotron-30b in us-east-1",
+        "details": {
+          "provider": "bedrock",
+          "region": "us-east-1",
+          "model": "nemotron-30b",
+          "token_present": "\u2705 Set"
+        }
+      },
+      {
+        "name": "API Connectivity",
+        "passed": true,
+        "warning": false,
+        "message": "Successfully called Bedrock API",
+        "details": {
+          "response": "TEST_PASSED"
+        }
+      }
+    ],
+    "Pipeline": [
+      {
+        "name": "Module Imports",
+        "passed": true,
+        "warning": false,
+        "message": "All 17 modules imported successfully",
+        "details": {
+          "pipeline.graph": "\u2705 OK",
+          "pipeline.runner": "\u2705 OK",
+          "pipeline.state": "\u2705 OK",
+          "agents.agent1_population": "\u2705 OK",
+          "agents.agent2_consequence": "\u2705 OK",
+          "agents.agent3_insilico": "\u2705 OK",
+          "agents.agent4_database": "\u2705 OK",
+          "agents.agent5_functional": "\u2705 OK",
+          "agents.agent6_segregation": "\u2705 OK",
+          "agents.agent7_denovo": "\u2705 OK",
+          "agents.agent8_gene_context": "\u2705 OK",
+          "agents.agent9_phenotype": "\u2705 OK",
+          "pipeline.nodes.vep_runner": "\u2705 OK",
+          "pipeline.nodes.post_process": "\u2705 OK",
+          "pipeline.nodes.evidence_aggregator": "\u2705 OK",
+          "rag.retriever": "\u2705 OK",
+          "config": "\u2705 OK"
+        }
+      },
+      {
+        "name": "RAG Retriever",
+        "passed": false,
+        "warning": false,
+        "message": "RAG retriever failed: cannot import name 'RAGRetriever' from 'rag.retriever' (/home/ubuntu/ai-native-acmg-pipeline/src/rag/retriever.py)",
+        "details": {
+          "error": "cannot import name 'RAGRetriever' from 'rag.retriever' (/home/ubuntu/ai-native-acmg-pipeline/src/rag/retriever.py)",
+          "traceback": "Traceback (most recent call last):\n  File \"/home/ubuntu/ai-native-acmg-pipeline/diagnostic_suite.py\", line 644, in test_rag_retriever\n    from rag.retriever import RAGRetriever\nImportError: cannot import name 'RAGRetriever' from 'rag.retriever' (/home/ubuntu/ai-native-acmg-pipeline/src/rag/retriever.py)\n"
+        }
+      },
+      {
+        "name": "Agent Execution",
+        "passed": true,
+        "warning": false,
+        "message": "Agent1 (Population) executed successfully",
+        "details": {
+          "criteria_pathogenic": {},
+          "criteria_benign": {},
+          "evidence_notes": "The variant has a max population allele frequency of 0.001, which exceeds the typical threshold for BA1 (gnomAD AF > 0.005 in a high-coverage gene), but the lack of homozygotes and empty population br"
+        }
+      }
+    ],
+    "API": [
+      {
+        "name": "Server Running",
+        "passed": true,
+        "warning": false,
+        "message": "API server is healthy",
+        "details": {
+          "status_code": 200,
+          "response": {
+            "status": "healthy",
+            "timestamp": "2026-06-21T17:52:12.672449"
+          }
+        }
+      },
+      {
+        "name": "Celery Worker",
+        "passed": true,
+        "warning": false,
+        "message": "1 worker(s) running",
+        "details": {
+          "workers": [
+            "celery@ip-172-31-29-38"
+          ]
+        }
+      }
+    ],
+    "End-to-End": [
+      {
+        "name": "VCF Analysis",
+        "passed": false,
+        "warning": false,
+        "message": "Analysis failed: run_session() missing 1 required positional argument: 'proband_bam_path'",
+        "details": {
+          "error": "run_session() missing 1 required positional argument: 'proband_bam_path'"
+        },
+        "log_file": "diagnostic_logs/End-to-End_VCF_Analysis_20260621_175208.log"
+      }
+    ]
+  },
+  "summary": {
+    "total": 18,
+    "passed": 13,
+    "failed": 5,
+    "warnings": 0
+  }
+}

@@ -17,10 +17,30 @@ Usage:
 Takes ~20-60 min on first run depending on ClinVar size.
 """
 
+# CRITICAL: Ensure environment is loaded BEFORE sentence-transformers import
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment early (before ChromaDB/sentence-transformers import)
+env_aws = Path(__file__).parent.parent.parent / ".env.aws"
+env_default = Path(__file__).parent.parent.parent / ".env"
+if env_aws.exists():
+    load_dotenv(env_aws)
+else:
+    load_dotenv(env_default)
+
+# Set cache directories from environment
+SENTENCE_TRANSFORMERS_HOME = os.getenv("SENTENCE_TRANSFORMERS_HOME")
+TRANSFORMERS_CACHE = os.getenv("TRANSFORMERS_CACHE")
+if SENTENCE_TRANSFORMERS_HOME:
+    os.environ["SENTENCE_TRANSFORMERS_HOME"] = SENTENCE_TRANSFORMERS_HOME
+if TRANSFORMERS_CACHE:
+    os.environ["TRANSFORMERS_CACHE"] = TRANSFORMERS_CACHE
+
 import logging
 import sys
 import re
-from pathlib import Path
 
 import cyvcf2
 

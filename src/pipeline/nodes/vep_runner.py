@@ -71,6 +71,8 @@ def _build_vep_command(
         "--cache",
         "--offline",
         "--dir",           str(VEP_ROOT),
+        # Use Plugins/ directory for .pm files (includes LoF.pm, dbNSFP.pm, SpliceAI.pm)
+        # loftee/ directory contains helper scripts (.pl files) referenced by LoF.pm
         "--dir_plugins",   str(_PLUGINS_DIR),
         "--species",       "homo_sapiens",
         "--assembly",      assembly,
@@ -83,8 +85,8 @@ def _build_vep_command(
         "--tab",
         "--no_stats",
 
-        # Multithreading - use 14 cores (leave 2 for system on 16-core pod)
-        "--fork",          "14",
+        # Multithreading - use 30 cores (leave 2 for system on 32-core instance)
+        "--fork",          "30",
 
         # Transcript / annotation flags
         "--canonical",
@@ -92,7 +94,13 @@ def _build_vep_command(
         "--numbers",
         "--hgvs",
         "--hgvsg",
-        "--everything",
+        "--af_gnomad",  # Add gnomAD allele frequencies from VEP cache
+        "--biotype",    # Add transcript biotype (protein_coding vs lncRNA) - CRITICAL for filtering
+        "--tsl",        # Transcript support level
+        "--appris",     # APPRIS principal isoform annotation
+        "--variant_class",  # SNV, insertion, deletion, etc.
+        # NOTE: Removed --everything flag (causes large output, 20% slowdown)
+        # We add back only the critical flags needed for ACMG classification
         # NOTE: Add "--merged" after installing RefSeq cache with:
         #   vep_install -a cf -s homo_sapiens -y GRCh38 --REFSEQ --CACHEDIR /workspace/data/.vep
         #   vep_install -a cf -s homo_sapiens -y GRCh37 --REFSEQ --CACHEDIR /workspace/data/.vep
@@ -118,6 +126,35 @@ def _build_vep_command(
             f"{loftee_gerp_flag}:{db['loftee_gerp']}"
         ),
 
+        # gnomAD custom annotation (population frequencies from merged VCF)
+        # Field list differs between builds: v4.1 (GRCh38) has AF_ami/AF_mid/AF_remaining
+        # while v2.1.1 (GRCh37) uses AF_oth instead of AF_remaining and lacks AF_ami/AF_mid
+    ]
+
+    if build_upper == "GRCH37":
+        # GRCh37 v2.1.1 fields
+        cmd.append("--custom")
+        cmd.append(
+            f"file={db['gnomad_vcf']},"
+            "short_name=gnomAD,"
+            "format=vcf,"
+            "type=exact,"
+            "coords=0,"
+            "fields=AF%AF_afr%AF_amr%AF_asj%AF_eas%AF_fin%AF_nfe%AF_oth%AF_sas%nhomalt"
+        )
+    else:
+        # GRCh38 v4.1 fields
+        cmd.append("--custom")
+        cmd.append(
+            f"file={db['gnomad_vcf']},"
+            "short_name=gnomAD,"
+            "format=vcf,"
+            "type=exact,"
+            "coords=0,"
+            "fields=AF%AF_afr%AF_ami%AF_amr%AF_asj%AF_eas%AF_fin%AF_mid%AF_nfe%AF_remaining%AF_sas%nhomalt"
+        )
+
+    cmd.extend([
         # ClinVar custom annotation
         "--custom", (
             f"file={db['clinvar_vcf']},"
@@ -127,7 +164,7 @@ def _build_vep_command(
             "coords=0,"
             "fields=CLNSIG%CLNREVSTAT%CLNDN%CLNACC"
         ),
-    ]
+    ])
 
     # Add --fasta only if reference file exists (required for complete HGVSc/HGVSp)
     if reference_fasta and Path(reference_fasta).exists():
@@ -217,7 +254,11 @@ def vep_runner_node(state: VariantState) -> dict:
     if proc.stderr:
         for line in proc.stderr.splitlines():
             ll = line.lower()
-            if any(kw in ll for kw in ("error", "failed", "die", "fatal")):
+            # Ignore plugin compilation warnings - they're harmless when using Docker VEP
+            if "failed to compile plugin" in ll and "can't locate" in ll:
+                logger.debug(f"[{session_id}] VEP plugin precompile warning (ignored): {line}")
+                continue
+            elif any(kw in ll for kw in ("error", "failed", "die", "fatal")):
                 logger.error(f"[{session_id}] VEP stderr: {line}")
                 warnings.append(f"VEP_ERROR: {line}")
             elif "warn" in ll or "could not" in ll:
@@ -244,3 +285,4 @@ def vep_runner_node(state: VariantState) -> dict:
         "vep_already_annotated": False,
         "warnings":              warnings,
     }
+

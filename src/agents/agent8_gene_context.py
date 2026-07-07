@@ -47,8 +47,7 @@ import logging
 from src.utils.logging_config import get_user_friendly_logger
 from typing import Optional
 from src.pipeline.state import VariantState
-from src.rag.retriever import query_clinvar_same_codon, query_clinvar_for_gene
-from src.utils.llm_client import call_llm_json
+from src.rag.parquet_retriever import query_clinvar_same_codon as query_clinvar_codon_parquet, query_repeatmasker
 from src.utils.disease_matcher import diseases_match, get_disease_match_confidence
 
 logger = get_user_friendly_logger('agent8_gene_context')
@@ -211,16 +210,14 @@ def _evaluate_pm5(
         )
         return None, notes, citations
 
-    # Build RAG query: same gene + same codon position + pathogenic
-    query = (
-        f"pathogenic missense variant in {gene} at protein position {protein_position} "
-        f"different amino acid change"
-    )
+    # Query Parquet: same gene + same codon position + pathogenic
     try:
-        rag_results = query_clinvar_same_codon(
+        rag_results = query_clinvar_codon_parquet(
             gene=gene,
             protein_pos=int(protein_position),
-            n_results=5,
+            genome_build="GRCh38",
+            window=2,  # Search ±2 residues (function parameter is 'window', not 'limit')
+            min_stars=2,  # Require 2+ stars for evidence quality
         )
     except Exception as exc:
         logger.warning(f" PM5 RAG query failed: {exc}")
@@ -234,15 +231,12 @@ def _evaluate_pm5(
         )
         return None, notes, citations
 
-    # Filter: same position, different AA change, pathogenic/likely pathogenic
+    # Filter: pathogenic/likely pathogenic (Parquet already returns dict format)
     hits = []
     for hit in rag_results:
-        meta = hit.get("metadata", {})
-        hit_pos = meta.get("protein_pos")
-        hit_sig = str(meta.get("clnsig", "")).upper()
-        # retriever already filters to same codon ±2; just confirm P/LP signal
+        hit_sig = str(hit.get("clnsig", "")).upper()
         if any(p in hit_sig for p in ("PATHOGENIC", "LIKELY_PATHOGENIC")):
-            hits.append(meta)
+            hits.append(hit)
 
     if not hits:
         notes.append(
@@ -253,11 +247,11 @@ def _evaluate_pm5(
 
     # PM5 fires — check disease context if available
     best_hit = hits[0] if hits else {}
-    clinvar_disease = best_hit.get("clndn", "")
+    clinvar_disease = best_hit.get("disease", "") or best_hit.get("clndn", "")
     base_strength = "Moderate"  # PM5 default strength
 
     hit_descriptions = "; ".join(
-        f"pos={h.get('protein_pos','?')} {h.get('alt','?')} ({h.get('clnsig','?')})"
+        f"pos={h.get('protein_pos','?')} {h.get('hgvsp','?')} ({h.get('clnsig','?')})"
         for h in hits[:3]
     )
 
@@ -295,81 +289,10 @@ def _evaluate_pm5(
         )
 
     citations = [
-        f"ClinVar: {h.get('gene','?')}:{h.get('chrom','?')}:{h.get('pos','?')}:{h.get('alt','?')}"
+        f"ClinVar: {h.get('gene','?')}:{h.get('chrom','?')}:{h.get('pos','?')}"
         for h in hits[:3]
     ]
     return base_strength, notes, citations
-
-# ---------------------------------------------------------------------------
-# LLM refinement
-# ---------------------------------------------------------------------------
-
-_SYSTEM_PROMPT = """You are an ACMG/AMP variant classification expert evaluating gene context evidence.
-You assess PM4, PM5, PP2, BP1, BP3.
-
-Key rules:
-- PM4 (Moderate): In-frame indel or stop-loss OUTSIDE repeat region causes protein length change.
-  Do NOT assign if variant is in a tandem repeat or low-complexity region.
-- BP3 (Supporting): In-frame indel INSIDE repeat region. Mutually exclusive with PM4.
-- PP2 (Supporting): Missense in gene with low benign missense rate (constrained gene).
-  Use gnomAD mis_Z ≥ 3.09 or oe_mis ≤ 0.6 as threshold.
-  Do NOT assign if gene mechanism is LOF-only.
-- BP1 (Supporting): Missense in gene where ONLY truncating variants cause disease (LOF-only mechanism).
-  Mutually exclusive with PP2.
-- PM5 (Moderate): Novel missense at same codon as established pathogenic missense (different AA).
-  Requires ClinVar evidence of pathogenic variant at same position with different change.
-  Do NOT assign PM5 if the same amino acid change is already known (that would be PS1 via agent4).
-
-Respond ONLY with a JSON object. No preamble, no markdown fences. Schema:
-{
-  "criteria_pathogenic": {},
-  "criteria_benign": {},
-  "evidence_notes": "string — 3-5 sentences",
-  "citations": ["sources"],
-  "confidence": "HIGH" | "MEDIUM" | "LOW"
-}"""
-
-
-def _llm_refine(
-    state: VariantState,
-    criteria_p: dict,
-    criteria_b: dict,
-    all_notes: list[str],
-    citations: list[str],
-) -> dict:
-    gene             = state.get("gene", "UNKNOWN")
-    variant_id       = state.get("variant_id", "?")
-    consequence      = state.get("consequence", "")
-    protein_pos      = state.get("protein_position") or "unknown"
-    aa_change        = state.get("amino_acid_change") or "unknown"
-    repeat_region    = state.get("repeat_region", False)
-    clingen_mech     = state.get("gene_clingen_mechanism") or "unknown"
-    clingen_validity = state.get("gene_clingen_validity") or "unknown"
-    gnomad_mis_z     = state.get("gnomad_mis_z")
-    gnomad_oe_mis    = state.get("gnomad_oe_mis")
-
-    user_prompt = f"""Evaluate gene context evidence for this variant:
-
-Gene: {gene} | Variant: {variant_id}
-Consequence: {consequence}
-Protein position: {protein_pos} | AA change: {aa_change}
-In repeat region: {repeat_region}
-ClinGen disease validity: {clingen_validity}
-ClinGen disease mechanism: {clingen_mech}
-gnomAD missense Z-score: {gnomad_mis_z}
-gnomAD oe_mis: {gnomad_oe_mis}
-
-Rule-based pre-evaluation:
-  Pathogenic criteria: {criteria_p}
-  Benign criteria: {criteria_b}
-  Notes: {'; '.join(all_notes)}
-  RAG citations: {citations}
-
-Evaluate PM4, PM5, PP2, BP1, BP3 given the above.
-Confirm or correct the rule-based assignments.
-Note any criteria that should be upgraded, downgraded, or removed."""
-
-    return call_llm_json(system_prompt=_SYSTEM_PROMPT, user_prompt=user_prompt)
 
 
 # ---------------------------------------------------------------------------
@@ -434,32 +357,12 @@ def agent8_gene_context(state: VariantState) -> dict:
     all_notes.extend(pm5_notes)
     all_citations.extend(pm5_citations)
 
-    # --- LLM refinement ---
-    # Run LLM when any criteria assigned, or for missense in constrained/known genes
-    needs_llm = bool(criteria_p or criteria_b) or (
-        consequence in MISSENSE_CONSEQUENCES and
-        state.get("gene_clingen_validity") not in (None, "", "No Reported Evidence")
+    # --- Rule-based only (no LLM) ---
+    confidence = "HIGH" if (criteria_p or criteria_b) else "MEDIUM"
+    evidence_notes = " ".join(all_notes) if all_notes else (
+        f"No gene context criteria applicable for {gene} "
+        f"(consequence={consequence}, repeat={repeat_region})."
     )
-
-    if needs_llm:
-        logger.debug(f" Calling LLM for {variant_id}")
-        llm_result = _llm_refine(state, criteria_p, criteria_b, all_notes, all_citations)
-        if llm_result and not llm_result.get("error"):
-            criteria_p     = llm_result.get("criteria_pathogenic", criteria_p)
-            criteria_b     = llm_result.get("criteria_benign", criteria_b)
-            confidence     = llm_result.get("confidence", "MEDIUM")
-            evidence_notes = llm_result.get("evidence_notes", " ".join(all_notes))
-            all_citations += llm_result.get("citations", [])
-        else:
-            logger.warning(f" LLM failed — rule-based only")
-            confidence     = "MEDIUM" if (criteria_p or criteria_b) else "LOW"
-            evidence_notes = " ".join(all_notes)
-    else:
-        confidence     = "LOW"
-        evidence_notes = (
-            f"No gene context criteria applicable for {gene} "
-            f"(consequence={consequence}, repeat={repeat_region})."
-        )
 
     all_citations = list(dict.fromkeys(all_citations))
 
@@ -478,4 +381,5 @@ def agent8_gene_context(state: VariantState) -> dict:
             }
         }
     }
+
 

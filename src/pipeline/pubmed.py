@@ -15,8 +15,21 @@ Set NCBI_API_KEY in .env to unlock higher rate.
 NCBI E-utilities docs: https://www.ncbi.nlm.nih.gov/books/NBK25497/
 """
 
-import logging
+# CRITICAL: Ensure environment is loaded BEFORE reading NCBI_API_KEY
 import os
+from pathlib import Path
+
+# If environment not already set, load from config
+if "NCBI_API_KEY" not in os.environ:
+    from dotenv import load_dotenv
+    env_aws = Path(__file__).parent.parent.parent / ".env.aws"
+    env_default = Path(__file__).parent.parent.parent / ".env"
+    if env_aws.exists():
+        load_dotenv(env_aws)
+    else:
+        load_dotenv(env_default)
+
+import logging
 import time
 from typing import Optional
 from urllib.parse import quote
@@ -29,13 +42,14 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 
-_NCBI_API_KEY  = os.getenv("NCBI_API_KEY", "")          # optional — set in .env
+# LAZY LOADING: Don't read API key at import time (worker.py sets it at runtime!)
+# Read on first request instead
+_NCBI_API_KEY  = None   # Will be loaded on first request
 _ESEARCH_URL   = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 _EFETCH_URL    = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 _ESUMMARY_URL  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 
-# Conservative rate limiting regardless of key presence
-_REQUEST_INTERVAL = 0.35 if _NCBI_API_KEY else 1.0   # seconds between requests
+_REQUEST_INTERVAL = None  # Will be set when API key is loaded
 _last_request_time: float = 0.0
 
 _TIMEOUT = 15   # seconds per request
@@ -46,9 +60,39 @@ _MAX_RETRIES = 2
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _load_ncbi_api_key() -> str:
+    """
+    Lazy load NCBI API key from environment.
+
+    Called on first PubMed request instead of at module import time.
+    This allows worker.py to set the key at runtime (after module import).
+
+    Returns:
+        API key string (empty if not set)
+    """
+    global _NCBI_API_KEY, _REQUEST_INTERVAL
+
+    if _NCBI_API_KEY is None:
+        # First call - load from environment
+        _NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")
+        _REQUEST_INTERVAL = 0.35 if _NCBI_API_KEY else 1.0
+
+        # Log API key status (only once)
+        if _NCBI_API_KEY:
+            logger.info(f"[PubMed] NCBI API key loaded: {_NCBI_API_KEY[:10]}... (rate: {_REQUEST_INTERVAL}s)")
+        else:
+            logger.warning(f"[PubMed] No NCBI API key - using free tier (rate: {_REQUEST_INTERVAL}s)")
+
+    return _NCBI_API_KEY
+
+
 def _rate_limit() -> None:
     """Enforce minimum interval between NCBI requests."""
     global _last_request_time
+
+    # Ensure API key is loaded (sets _REQUEST_INTERVAL)
+    _load_ncbi_api_key()
+
     elapsed = time.monotonic() - _last_request_time
     wait = _REQUEST_INTERVAL - elapsed
     if wait > 0:
@@ -61,8 +105,10 @@ def _get(url: str, params: dict) -> Optional[dict]:
     GET request to NCBI with rate limiting and retry.
     Returns parsed JSON or None on failure.
     """
-    if _NCBI_API_KEY:
-        params["api_key"] = _NCBI_API_KEY
+    # Ensure API key is loaded and add to params if available
+    api_key = _load_ncbi_api_key()
+    if api_key:
+        params["api_key"] = api_key
 
     for attempt in range(_MAX_RETRIES + 1):
         _rate_limit()
@@ -273,4 +319,5 @@ def pubmed_format_for_llm(papers: list[dict], max_papers: int = 8) -> str:
             f"{p['journal']}: {p['title']}"
         )
     return "\n".join(lines)
+
 

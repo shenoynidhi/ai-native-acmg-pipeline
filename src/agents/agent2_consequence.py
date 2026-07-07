@@ -33,8 +33,6 @@ import re
 from typing import Optional
 
 from src.pipeline.state import VariantState
-from src.utils.llm_client import call_llm_json
-from src.utils.criteria_normalizer import normalize_strength
 
 logger = get_user_friendly_logger('agent2_consequence')
 
@@ -213,83 +211,6 @@ def _evaluate_pvs1_strength(
 
 
 # ---------------------------------------------------------------------------
-# LLM refinement
-# ---------------------------------------------------------------------------
-
-_SYSTEM_PROMPT = """You are an ACMG/AMP variant classification expert specialising in null variant
-and loss-of-function evidence. You apply the ClinGen PVS1 decision tree (Tayoun et al. 2018).
-
-Respond ONLY with a JSON object. No preamble, no markdown fences. Schema:
-{
-  "criteria_pathogenic": {},
-  "criteria_benign": {},
-  "evidence_notes": "string — 3-5 sentences explaining reasoning",
-  "citations": ["list of sources"],
-  "confidence": "HIGH" | "MEDIUM" | "LOW",
-  "pvs1_strength": "Very_Strong" | "Strong" | "Moderate" | "Supporting" | "Not_Applied",
-  "pvs1_caveats": ["list of caveats triggered"],
-  "lof_mechanism_established": true | false
-}
-
-PVS1 goes in criteria_pathogenic with its strength as the value. E.g.:
-  {"PVS1": "Very_Strong"}
-If PVS1 does not apply, both criteria dicts should be empty."""
-
-
-def _llm_refine_pvs1(state: VariantState, rule_strength: Optional[str], caveats: list) -> dict:
-    """Call LLM for PVS1 cases that are ambiguous or borderline."""
-    gene        = state.get("gene", "UNKNOWN")
-    consequence = state.get("consequence", "")
-    exon        = state.get("exon_number") or "unknown"
-    intron      = state.get("intron_number") or "N/A"
-    hgvsc       = state.get("hgvsc") or "unknown"
-    hgvsp       = state.get("hgvsp") or "N/A"
-    transcript  = state.get("transcript") or "unknown"
-    pli         = state.get("gene_gnomad_pli")
-    loeuf       = state.get("gene_gnomad_loeuf")
-    clingen     = state.get("gene_clingen_validity") or "Unknown"
-    inheritance = state.get("gene_orphanet_inheritance") or "Unknown"
-    loftee_hc   = state.get("is_loftee_hc", False)
-    lof_frac    = state.get("gene_clinvar_lof_fraction")
-    clnsig      = state.get("clinvar_classification") or "Not in ClinVar"
-    clnstars    = state.get("clinvar_review_stars", 0)
-
-    user_prompt = f"""Evaluate PVS1 for this variant using the ClinGen PVS1 decision tree:
-
-Gene: {gene}
-Transcript: {transcript}
-Consequence: {consequence}
-HGVSc: {hgvsc}
-HGVSp: {hgvsp}
-Exon: {exon}
-Intron: {intron}
-
-Gene-level evidence:
-  ClinGen validity: {clingen}
-  Inheritance: {inheritance}
-  gnomAD pLI: {pli}
-  gnomAD LOEUF: {loeuf}
-  ClinVar LoF fraction: {lof_frac}
-  LOFTEE high-confidence LoF: {loftee_hc}
-
-ClinVar for this variant: {clnsig} ({clnstars} stars)
-
-Rule-based pre-evaluation:
-  PVS1 strength assigned: {rule_strength or 'Not assigned'}
-  Caveats triggered: {caveats}
-
-Apply all 5 PVS1 caveats:
-1. Is LoF an established disease mechanism?
-2. Does the variant cause NMD (not last exon, not last 50nt of penultimate exon)?
-3. Are there functional alternative transcripts that escape the variant?
-4. Is the truncation in a critical functional domain?
-5. Is there prior LoF evidence at this locus from ClinVar/literature?
-"""
-
-    return call_llm_json(system_prompt=_SYSTEM_PROMPT, user_prompt=user_prompt)
-
-
-# ---------------------------------------------------------------------------
 # Main agent function
 # ---------------------------------------------------------------------------
 
@@ -342,75 +263,30 @@ def agent2_consequence(state: VariantState) -> dict:
         gene, clingen, inheritance, pli, loeuf, lof_fraction
     )
 
-    # --- Rule-based strength assignment ---
+    # --- Rule-based strength assignment (100% rules, no LLM) ---
     rule_strength, caveats = _evaluate_pvs1_strength(
         consequence, is_loftee_hc, lof_mech,
         exon_number, intron_number, hgvsc, pli, loeuf,
     )
 
-    # --- Determine if LLM needed ---
-    # Call LLM when: strength is ambiguous, multiple caveats, or splice region
-    needs_llm = (
-        rule_strength in {"Moderate", "Supporting"} or
-        len(caveats) >= 2 or
-        consequence in SPLICE_REGION_CONSEQUENCES or
-        not lof_mech
-    )
-
-    if needs_llm:
-        logger.debug(f" Calling LLM for PVS1 on {variant_id}")
-        llm_result = _llm_refine_pvs1(state, rule_strength, caveats)
-
-        if llm_result and not llm_result.get("error"):
-            llm_strength   = llm_result.get("pvs1_strength", "Not_Applied")
-            llm_caveats    = llm_result.get("pvs1_caveats", caveats)
-            evidence_notes = llm_result.get("evidence_notes", "")
-            confidence     = llm_result.get("confidence", "MEDIUM")
-            citations     += llm_result.get("citations", [])
-
-            # Normalize LLM output using shared normalizer
-            if llm_strength and llm_strength != "Not_Applied":
-                llm_strength = normalize_strength("PVS1", llm_strength)
-                if llm_strength:
-                    criteria_p["PVS1"] = llm_strength
-                else:
-                    # Normalization failed, fall back to rule-based
-                    logger.warning(
-                        f"[agent2] Could not normalize LLM PVS1 strength. "
-                        f"Using rule-based: {rule_strength}"
-                    )
-                    if rule_strength:
-                        criteria_p["PVS1"] = rule_strength
-            caveats = llm_caveats
-        else:
-            logger.warning(f" LLM failed for {variant_id} — using rule-based")
-            if rule_strength:
-                criteria_p["PVS1"] = rule_strength
-            confidence = "LOW"
-            evidence_notes = (
-                f"PVS1 ({rule_strength or 'Not_Applied'}) assigned by rules. "
-                f"LLM unavailable. Caveats: {'; '.join(caveats) or 'None'}. "
-                f"LoF mechanism: {lof_mech_reason}."
-            )
-    else:
-        # High-confidence rule result
-        if rule_strength:
-            criteria_p["PVS1"] = rule_strength
+    # Assign PVS1 strength from rules
+    if rule_strength:
+        criteria_p["PVS1"] = rule_strength
         confidence = "HIGH"
         evidence_notes = (
             f"PVS1 ({rule_strength}) applies to {gene} {consequence}. "
-            f"LoF mechanism established ({lof_mech_reason}). "
+            f"LoF mechanism: {lof_mech_reason}. "
             f"LOFTEE HC: {is_loftee_hc}. "
             f"Caveats: {'; '.join(caveats) or 'None'}."
         )
-
-    # No strength assigned at all
-    if not criteria_p and not criteria_b:
+    else:
+        # No PVS1 strength assigned
+        confidence = "HIGH"
         evidence_notes = (
             f"PVS1 does not apply for {gene} {consequence}. "
-            f"LoF mechanism evidence: {lof_mech_reason}."
+            f"LoF mechanism evidence: {lof_mech_reason}. "
+            f"Caveats: {'; '.join(caveats) or 'None'}."
         )
-        confidence = "HIGH"
 
     citations = list(dict.fromkeys(citations))
     logger.info(
@@ -428,4 +304,5 @@ def agent2_consequence(state: VariantState) -> dict:
             }
         }
     }
+
 

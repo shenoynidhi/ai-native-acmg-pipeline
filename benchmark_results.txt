@@ -1,0 +1,2 @@
+Baseline: 04:17:54 [INFO]   Per variant:    18.89s/variant
+Optimized: 04:40:15 [INFO]   Per variant:    8.59s/variant

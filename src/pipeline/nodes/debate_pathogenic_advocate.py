@@ -36,6 +36,27 @@ State fields WRITTEN:
   }
 """
 
+# CRITICAL: Ensure environment is loaded BEFORE sentence-transformers import
+import os
+from pathlib import Path
+
+# Set cache directories early if not already set
+if "SENTENCE_TRANSFORMERS_HOME" not in os.environ:
+    from dotenv import load_dotenv
+    env_aws = Path(__file__).parent.parent.parent.parent / ".env.aws"
+    env_default = Path(__file__).parent.parent.parent.parent / ".env"
+    if env_aws.exists():
+        load_dotenv(env_aws)
+    else:
+        load_dotenv(env_default)
+
+    SENTENCE_TRANSFORMERS_HOME = os.getenv("SENTENCE_TRANSFORMERS_HOME")
+    TRANSFORMERS_CACHE = os.getenv("TRANSFORMERS_CACHE")
+    if SENTENCE_TRANSFORMERS_HOME:
+        os.environ["SENTENCE_TRANSFORMERS_HOME"] = SENTENCE_TRANSFORMERS_HOME
+    if TRANSFORMERS_CACHE:
+        os.environ["TRANSFORMERS_CACHE"] = TRANSFORMERS_CACHE
+
 import json
 import logging
 from src.utils.logging_config import get_user_friendly_logger
@@ -45,7 +66,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 
 from src.pipeline.state import VariantState
-from src.utils.llm_client import call_llm_json
+from src.utils.llm_client import call_llm_json  # invoke_model with reasoning support
 from src.config import CHROMADB_DIR
 
 logger = get_user_friendly_logger('pathogenic_advocate')
@@ -172,7 +193,10 @@ Rules you must follow:
 ACMG GUIDELINE REFERENCE (retrieved for this variant's specific criteria):
 {guidelines_text}
 
-Output format — respond with valid JSON only, no markdown:
+CRITICAL: Respond with JSON ONLY. Do NOT wrap your response in <reasoning> tags.
+Do NOT output thinking or explanation before the JSON. Output the JSON directly.
+
+Output format:
 {{
   "advocate_classification": "Pathogenic|Likely_Pathogenic|VUS|Likely_Benign|Benign",
   "additional_criteria_proposed": ["criterion:strength", ...],
@@ -278,8 +302,16 @@ def debate_pathogenic_advocate_node(state: VariantState) -> dict:
     system_prompt = _build_system_prompt(guideline_chunks)
     user_prompt   = _build_user_prompt(state, clinvar_chunks)
 
-    # Increase max_tokens to prevent JSON truncation (default 1000 → 2048)
-    raw_result = call_llm_json(system_prompt, user_prompt, max_tokens=2048)
+    # Use GPT-OSS-20B for reliable JSON output
+    # CRITICAL: Do NOT use reasoning_effort parameter - it forces model to wrap
+    # ALL output in <reasoning> tags, preventing JSON extraction
+    raw_result = call_llm_json(
+        system_prompt,
+        user_prompt,
+        max_tokens=4096,
+        model_override="google.gemma-3-12b-it"
+        # NO reasoning_effort - causes reasoning tag wrapper that breaks parsing
+    )
 
     # Validate and normalise output
     result = _validate_advocate_output(raw_result, variant_id)

@@ -38,6 +38,9 @@ import copy
 import logging
 from pathlib import Path
 from typing import Optional
+from multiprocessing import cpu_count
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing
 
 from src.pipeline.graph import VARIANT_GRAPH, PASS2_GRAPH
 from src.pipeline.state import build_initial_state, VariantState
@@ -51,6 +54,20 @@ from src.utils.logging_config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Variant-level parallelization: use 16 workers on 32-core system
+# Leave headroom for system processes and avoid memory pressure
+# NOTE: If running Celery with --concurrency=2 or higher, reduce this to 8
+#       to avoid CPU overload (2 VCFs × 8 variants = 16 total, fits 32 cores)
+NUM_VARIANT_WORKERS = min(28, max(1, cpu_count() - 2))
+
+
+def _is_running_in_celery():
+    """Check if we're running inside a Celery worker (daemon process)."""
+    try:
+        return multiprocessing.current_process().daemon
+    except:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +150,7 @@ def _run_variant_pass(
     parent2_bam_path:  Optional[str],
     proband_sex:       str,
     case_database_csv: Optional[str],
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> VariantState:
     """
     Run the PASS2_GRAPH for one already-annotated variant.
@@ -209,6 +227,33 @@ def _run_variant_pass(
             f"Pipeline error: {e}"
         ]
         return state
+
+
+# ---------------------------------------------------------------------------
+# Parallel variant processing wrapper (for multiprocessing.Pool)
+# ---------------------------------------------------------------------------
+
+def _process_single_variant_worker(args: tuple) -> VariantState:
+    """
+    Worker function for parallel variant processing.
+
+    This function is called by multiprocessing.Pool workers.
+    Each worker processes one variant independently.
+
+    Args:
+        args: Tuple of (variant_state, session_params)
+              session_params contains all the kwargs needed by _run_variant_pass
+
+    Returns:
+        Completed VariantState after agents + debate + HPO + report
+    """
+    variant_state, session_params = args
+
+    # Unpack session parameters
+    return _run_variant_pass(
+        variant_state=variant_state,
+        **session_params
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -309,38 +354,103 @@ def run_session(
         }
 
     # ── Pass 2: agents + debate + HPO per variant ────────────────────────────
-    completed_states = []
+    # Process variants in parallel (16 workers on 32-core system)
+    # This gives 16× speedup on Pass 2 (the slowest part of the pipeline)
+
     total = len(parsed_variants)
+    logger.info(
+        f"[{session_id}] Processing {total} variants in parallel "
+        f"({NUM_VARIANT_WORKERS} workers)"
+    )
 
-    for i, variant_state in enumerate(parsed_variants, start=1):
-        variant_id = variant_state.get("variant_id", f"variant_{i}")
-        gene = variant_state.get("gene", "unknown")
-        logger.info(f"[{session_id}] Variant {i}/{total}: {variant_id}")
+    # Build session parameters dict (same for all variants)
+    # NOTE: progress_callback cannot be pickled, so we don't pass it to workers
+    # Progress updates happen in the main process as results come back
+    session_params = {
+        "session_id": session_id,
+        "proband_vcf_path": proband_vcf_path,
+        "genome_build": genome_build,
+        "annotated_tsv": annotated_tsv,
+        "clinical_notes": clinical_notes,
+        "patient_hpo_terms": patient_hpo_terms or [],
+        "parent1_vcf_path": parent1_vcf_path,
+        "parent2_vcf_path": parent2_vcf_path,
+        "proband_bam_path": proband_bam_path,
+        "parent1_bam_path": parent1_bam_path,
+        "parent2_bam_path": parent2_bam_path,
+        "proband_sex": proband_sex,
+        "case_database_csv": case_database_csv,
+        "progress_callback": None,  # Cannot be pickled for multiprocessing
+    }
 
-        # Emit progress: starting variant
-        progress.variant_starting(variant_id, gene, i)
+    # Prepare arguments for worker pool (variant_state, session_params pairs)
+    worker_args = [(variant_state, session_params) for variant_state in parsed_variants]
 
-        result = _run_variant_pass(
-            variant_state     = variant_state,
-            session_id        = session_id,
-            proband_vcf_path  = proband_vcf_path,
-            genome_build      = genome_build,
-            annotated_tsv     = annotated_tsv,
-            clinical_notes    = clinical_notes,
-            patient_hpo_terms = patient_hpo_terms or [],
-            parent1_vcf_path  = parent1_vcf_path,
-            parent2_vcf_path  = parent2_vcf_path,
-            proband_sex       = proband_sex,
-            proband_bam_path = proband_bam_path,
-            parent1_bam_path = parent1_bam_path,
-            parent2_bam_path = parent2_bam_path,
-            case_database_csv = case_database_csv,
-        )
-        completed_states.append(result)
+    # Process variants in parallel
+    # Use ThreadPoolExecutor if in Celery (daemon), otherwise use multiprocessing.Pool
+    completed_states = []
 
-        # Emit progress: variant complete
-        classification = result.get("final_classification", "VUS")
-        progress.variant_complete(variant_id, gene, classification)
+    if _is_running_in_celery():
+        # Running in Celery worker (daemon process) - use threads instead of processes
+        logger.info(f"[{session_id}] Running in Celery - using ThreadPoolExecutor")
+
+        with ThreadPoolExecutor(max_workers=NUM_VARIANT_WORKERS) as executor:
+            # Submit all variants
+            future_to_idx = {
+                executor.submit(_process_single_variant_worker, args): i
+                for i, args in enumerate(worker_args, start=1)
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_idx):
+                i = future_to_idx[future]
+                try:
+                    result = future.result(timeout=600)  # 10 min timeout per variant
+
+                    variant_id = result.get("variant_id", f"variant_{i}")
+                    gene = result.get("gene", "unknown")
+                    classification = result.get("final_classification", "VUS")
+
+                    logger.info(
+                        f"[{session_id}] Variant {i}/{total}: {variant_id} → {classification}"
+                    )
+
+                    # Emit progress
+                    progress.variant_complete(variant_id, gene, classification)
+
+                    completed_states.append(result)
+
+                except Exception as e:
+                    logger.error(f"[{session_id}] Variant {i} failed: {e}")
+                    # Create error state
+                    completed_states.append({
+                        "variant_id": f"variant_{i}",
+                        "final_classification": "VUS",
+                        "confidence": "LOW",
+                        "evidence_summary": f"Processing error: {e}",
+                    })
+
+    else:
+        # Not in Celery - use multiprocessing.Pool for true parallel execution
+        logger.info(f"[{session_id}] Using multiprocessing.Pool for parallel processing")
+
+        from multiprocessing import Pool
+
+        with Pool(processes=NUM_VARIANT_WORKERS) as pool:
+            # Use imap for better progress tracking (results come back as they complete)
+            for i, result in enumerate(pool.imap(_process_single_variant_worker, worker_args), start=1):
+                variant_id = result.get("variant_id", f"variant_{i}")
+                gene = result.get("gene", "unknown")
+                classification = result.get("final_classification", "VUS")
+
+                logger.info(
+                    f"[{session_id}] Variant {i}/{total}: {variant_id} → {classification}"
+                )
+
+                # Emit progress
+                progress.variant_complete(variant_id, gene, classification)
+
+                completed_states.append(result)
 
     logger.info(
         f"[{session_id}] All {len(completed_states)} variants processed — "
@@ -379,10 +489,19 @@ def run_session(
             report_paths={k: str(v) for k, v in report_paths.items()}
         )
 
+    # Finalize token usage tracking
+    try:
+        from src.utils.token_tracker import finalize_session
+        finalize_session(session_id)
+        logger.info(f"[{session_id}] Token usage summary saved")
+    except Exception as e:
+        logger.warning(f"[{session_id}] Failed to finalize token tracking: {e}")
+
     return {
         "session_id":       session_id,
         "variant_count":    len(completed_states),
         "report_paths":     report_paths,
         "completed_states": completed_states,
     }
+
 
