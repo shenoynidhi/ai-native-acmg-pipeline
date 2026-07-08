@@ -38,11 +38,11 @@ _DBNSFP_FIELDS = [
     "MetaSVM_score",
 ]
 
-# LOFTEE GERP parameter - use gerp_file for both builds (works with .tsv.gz and .txt.gz)
-# Note: gerp_bigwig (.bw) is also valid but requires newer LOFTEE version
+# LOFTEE uses different GERP mechanism per build
+# GRCh38: bigwig (.bw)   GRCh37: tabix-indexed txt.gz
 _LOFTEE_GERP_FLAG = {
-    "GRCh38": "gerp_file",
-    "GRCh37": "gerp_file",
+    "GRCh38": "gerp_bigwig",
+    "GRCh37": "gerp_tabix",
 }
 
 
