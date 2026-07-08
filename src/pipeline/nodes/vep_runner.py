@@ -24,6 +24,7 @@ from src.pipeline.state import VariantState
 logger = logging.getLogger(__name__)
 
 _PLUGINS_DIR = VEP_ROOT / "Plugins"
+_LOFTEE_DIR = VEP_ROOT / "loftee"
 
 _DBNSFP_FIELDS = [
     "Ensembl_transcriptid",  # Transcript IDs for matching multi-transcript scores
@@ -120,7 +121,7 @@ def _build_vep_command(
 
         # LOFTEE plugin
         "--plugin", (
-            f"LoF,"
+            f"{_LOFTEE_DIR}/LoF,"
             f"loftee_path:{db['loftee_dir']},"
             f"human_ancestor_fa:{db['loftee_human_ancestor_fa']},"
             f"{loftee_gerp_flag}:{db['loftee_gerp']}"
