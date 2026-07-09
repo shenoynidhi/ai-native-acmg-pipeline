@@ -121,7 +121,7 @@ def _build_vep_command(
 
         # LOFTEE plugin
         "--plugin", (
-            f"{_LOFTEE_DIR}/LoF,"
+            f"LoF,"
             f"loftee_path:{db['loftee_dir']},"
             f"human_ancestor_fa:{db['loftee_human_ancestor_fa']},"
             f"{loftee_gerp_flag}:{db['loftee_gerp']}"
