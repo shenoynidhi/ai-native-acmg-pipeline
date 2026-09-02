@@ -30,7 +30,9 @@ if "NCBI_API_KEY" not in os.environ:
         load_dotenv(env_default)
 
 import logging
+import threading
 import time
+from collections import Counter
 from typing import Optional
 from urllib.parse import quote
 
@@ -54,6 +56,22 @@ _last_request_time: float = 0.0
 
 _TIMEOUT = 15   # seconds per request
 _MAX_RETRIES = 2
+
+# ---------------------------------------------------------------------------
+# Thread-safety primitives
+# ---------------------------------------------------------------------------
+
+# Guards _last_request_time across all threads sharing this process
+# (28-thread ThreadPoolExecutor all calling _rate_limit() concurrently —
+# without this lock, time.sleep() releases the GIL mid-check and multiple
+# threads read the same stale timestamp, causing bursts that trip NCBI 429s)
+_rate_limit_lock = threading.Lock()
+
+# Query-duplication counter — NOT a results cache. Only tallies how often
+# an identical (gene, hgvsp, hgvsc, query_type) key is requested, so we can
+# decide from real data whether adding a results cache is worth it.
+_query_counts_lock = threading.Lock()
+_query_counts: Counter = Counter()
 
 
 # ---------------------------------------------------------------------------
@@ -87,17 +105,20 @@ def _load_ncbi_api_key() -> str:
 
 
 def _rate_limit() -> None:
-    """Enforce minimum interval between NCBI requests."""
+    """Enforce minimum interval between NCBI requests. Thread-safe."""
     global _last_request_time
 
     # Ensure API key is loaded (sets _REQUEST_INTERVAL)
     _load_ncbi_api_key()
 
-    elapsed = time.monotonic() - _last_request_time
-    wait = _REQUEST_INTERVAL - elapsed
-    if wait > 0:
-        time.sleep(wait)
-    _last_request_time = time.monotonic()
+    # Hold the lock across read-decide-sleep-write so no other thread can
+    # read a stale _last_request_time while this thread is sleeping.
+    with _rate_limit_lock:
+        elapsed = time.monotonic() - _last_request_time
+        wait = _REQUEST_INTERVAL - elapsed
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_time = time.monotonic()
 
 
 def _get(url: str, params: dict) -> Optional[dict]:
@@ -241,6 +262,20 @@ def pubmed_search(
         logger.debug("pubmed_search: no gene provided — skipping")
         return []
 
+    # --- Duplicate-query instrumentation (counts only, no results cached) ---
+    query_key = (gene, hgvsp, hgvsc, query_type)
+    with _query_counts_lock:
+        _query_counts[query_key] += 1
+        count = _query_counts[query_key]
+    if count > 1:
+        logger.info(
+            f"[PubMed] DUPLICATE QUERY #{count}: gene={gene} hgvsp={hgvsp} "
+            f"hgvsc={hgvsc} type={query_type} — this is an uncached NCBI call. "
+            f"Consider caching if this count climbs."
+        )
+    else:
+        logger.debug(f"[PubMed] query: gene={gene} hgvsp={hgvsp} hgvsc={hgvsc} type={query_type}")
+
     query = _build_query(gene, hgvsp, hgvsc, query_type)
     logger.debug(f"PubMed query ({query_type}): {query}")
 
@@ -321,3 +356,20 @@ def pubmed_format_for_llm(papers: list[dict], max_papers: int = 8) -> str:
     return "\n".join(lines)
 
 
+def get_duplicate_query_stats() -> dict:
+    """
+    Return current duplicate-query counts for inspection/debugging.
+    Call this from a shell, admin endpoint, or periodic log dump to see
+    which (gene, hgvsp, hgvsc, query_type) combos are repeating most.
+
+    Returns:
+        dict mapping "gene|hgvsp|hgvsc|query_type" -> call count,
+        sorted descending by count. Only includes keys called >1 time.
+    """
+    with _query_counts_lock:
+        snapshot = dict(_query_counts)
+    duplicates = {
+        "|".join(str(x) for x in k): v
+        for k, v in snapshot.items() if v > 1
+    }
+    return dict(sorted(duplicates.items(), key=lambda kv: kv[1], reverse=True))
