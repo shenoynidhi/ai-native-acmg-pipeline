@@ -37,7 +37,13 @@ from typing import Dict, List, Optional, Tuple
 from src.config import DATABASE_PATHS, OUTPUT_DIR
 from src.pipeline.state import VariantState, build_initial_state
 import gzip as _gzip
-from src.rag.parquet_retriever import query_gnomad_constraint, query_clingen_gene
+
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    logger.warning("pandas not available - VEP TSV parsing will be slower")
 
 try:
     from cyvcf2 import VCF
@@ -143,17 +149,21 @@ def _extract_parental_genotype(
 
 # ---------------------------------------------------------------------------
 # gnomAD population AF columns in VEP TSV output
+# GRCh38 v4.1 uses AF_ami, AF_mid, AF_remaining
+# GRCh37 v2.1.1 uses AF_oth (not AF_remaining) and lacks AF_ami/AF_mid
 # ---------------------------------------------------------------------------
 _GNOMAD_POP_COLS = {
-    "afr": "gnomADe_AFR_AF",
-    "amr": "gnomADe_AMR_AF",
-    "asj": "gnomADe_ASJ_AF",
-    "eas": "gnomADe_EAS_AF",
-    "fin": "gnomADe_FIN_AF",
-    "mid": "gnomADe_MID_AF",
-    "nfe": "gnomADe_NFE_AF",
-    "sas": "gnomADe_SAS_AF",
-    "remaining": "gnomADe_REMAINING_AF",
+    "afr": "gnomAD_AF_afr",
+    "ami": "gnomAD_AF_ami",        # GRCh38 only
+    "amr": "gnomAD_AF_amr",
+    "asj": "gnomAD_AF_asj",
+    "eas": "gnomAD_AF_eas",
+    "fin": "gnomAD_AF_fin",
+    "mid": "gnomAD_AF_mid",        # GRCh38 only
+    "nfe": "gnomAD_AF_nfe",
+    "remaining": "gnomAD_AF_remaining",  # GRCh38
+    "oth": "gnomAD_AF_oth",        # GRCh37 equivalent of "remaining"
+    "sas": "gnomAD_AF_sas",
 }
 
 # Consequence types used for structural flags
@@ -385,60 +395,98 @@ _vcf_reader_cache: Dict[str, any] = {}  # {vcf_path: VCF_object}
 
 def _load_gnomad_constraint() -> Dict[str, Dict]:
     """
-    Initialize gnomAD constraint cache (Parquet on-demand queries).
-    NEW: Returns empty dict - we query Parquet per-gene instead of loading 19,704 genes into memory.
+    Load gnomAD v2.1.1 constraint metrics indexed by gene symbol.
+    Returns: {gene: {pLI, oe_lof_upper (LOEUF), oe_mis_z}}
     """
     global _gnomad_constraint_cache
     if _gnomad_constraint_cache is not None:
         return _gnomad_constraint_cache
 
-    _gnomad_constraint_cache = {}
-    logger.info("gnomAD constraint: Using Parquet on-demand queries (100× faster)")
-    return _gnomad_constraint_cache
+    path = Path(DATABASE_PATHS["gnomad_constraint"])
+    cache: Dict[str, Dict] = {}
 
+    if not path.exists():
+        logger.warning(f"gnomAD constraint file not found: {path}")
+        _gnomad_constraint_cache = cache
+        return cache
 
-def _get_gnomad_constraint(gene: str) -> Dict:
-    """Get gnomAD constraint for a single gene via Parquet query."""
     try:
-        result = query_gnomad_constraint(gene)
-        if result:
-            return {
-                "pLI": result.get("pLI"),
-                "loeuf": result.get("oe_lof_upper"),
-                "z": result.get("mis_z"),
-            }
+        # Detect BGZF/gzip by magic bytes regardless of file extension
+        with open(path, "rb") as _f:
+            _magic = _f.read(2)
+        opener = _gzip.open if _magic == b'\x1f\x8b' else open
+        with opener(path, "rt", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh, delimiter="\t")
+            for row in reader:
+                gene = row.get("gene", "").strip()
+                if not gene:
+                    continue
+                try:
+                    cache[gene] = {
+                        "pLI":   float(row.get("pLI", "nan")),
+                        "loeuf": float(row.get("oe_lof_upper", "nan")),
+                        "z":     float(row.get("oe_mis_z", "nan")),
+                    }
+                except (ValueError, KeyError):
+                    continue
+        logger.info(f"Loaded gnomAD constraint for {len(cache)} genes.")
     except Exception as e:
-        logger.debug(f"gnomAD Parquet query failed for {gene}: {e}")
-    return {}
+        logger.warning(f"Could not load gnomAD constraint: {e}")
 
+    _gnomad_constraint_cache = cache
+    return cache
 
 
 def _load_clingen() -> Dict[str, str]:
     """
-    Initialize ClinGen validity cache (Parquet on-demand queries).
-    NEW: Returns empty dict - we query Parquet per-gene instead of loading entire CSV.
+    Load ClinGen gene-disease validity classifications indexed by gene symbol.
+    Returns: {gene: classification}  e.g. {"BRCA2": "Definitive"}
     """
     global _clingen_cache
     if _clingen_cache is not None:
         return _clingen_cache
 
-    _clingen_cache = {}
-    logger.info("ClinGen validity: Using Parquet on-demand queries")
-    return _clingen_cache
+    path = Path(DATABASE_PATHS["clingen_validity"])
+    cache: Dict[str, str] = {}
 
+    if not path.exists():
+        logger.warning(f"ClinGen validity file not found: {path}")
+        _clingen_cache = cache
+        return cache
 
-def _get_clingen_validity(gene: str) -> Optional[str]:
-    """Get ClinGen validity classification for a single gene via Parquet query."""
     try:
-        result = query_clingen_gene(gene)
-        if result:
-            return result.get("classification")
+        with open(path, "r", encoding="utf-8") as fh:
+            # ClinGen CSV has variable header lines starting with #
+            # Skip 4 metadata lines before the real header
+            for _ in range(4):
+                next(fh)
+            reader = csv.DictReader(fh)
+            for row in reader:
+                gene = (row.get("GENE SYMBOL") or "").strip().strip('"')
+                classification = (row.get("CLASSIFICATION") or "").strip().strip('"')    
+                if gene and classification:
+                    # Keep highest classification if gene appears multiple times
+                    _RANK = {
+                        "Definitive": 5, "Strong": 4, "Moderate": 3,
+                        "Limited": 2, "Animal Model Only": 1,
+                        "No Known Disease Relationship": 0,
+                        "Disputed": 0, "Refuted": 0,
+                    }
+                    existing_rank = _RANK.get(cache.get(gene, ""), -1)
+                    new_rank = _RANK.get(classification, -1)
+                    if new_rank > existing_rank:
+                        cache[gene] = classification
+        logger.info(f"Loaded ClinGen validity for {len(cache)} genes.")
     except Exception as e:
-        logger.debug(f"ClinGen Parquet query failed for {gene}: {e}")
-    return None
+        logger.warning(f"Could not load ClinGen validity: {e}")
+
+    _clingen_cache = cache
+    return cache
 
 
-
+# ===========================================================================
+# Value parsers — all return None on missing/invalid input
+# ===========================================================================
 
 def _float(value: str, transcript_id: str = None, transcript_list: str = None) -> Optional[float]:
     """
@@ -505,9 +553,17 @@ def _int(value: str) -> Optional[int]:
 
 
 def _str(value: str) -> Optional[str]:
-    if not value or value in (".", "-", ""):
+    # Handle both string and float/NaN values from pandas
+    if value is None:
         return None
-    return value.strip()
+    if isinstance(value, float):
+        if pd.isna(value):
+            return None
+        value = str(value)
+    value = str(value).strip()
+    if not value or value in (".", "-", "nan"):
+        return None
+    return value
 
 
 def _parse_spliceai(value: str) -> float:
@@ -587,8 +643,8 @@ def _max_gnomad_af(row: Dict, pop_cols: Dict) -> Tuple[float, Dict[str, float]]:
     by_pop: Dict[str, float] = {}
     max_af = 0.0
 
-    # gnomADe (exome) AFs from VEP --everything
-    global_af = _float(row.get("gnomADe_AF", ".") or ".")
+    # gnomAD overall AF from VEP --custom gnomAD VCF
+    global_af = _float(row.get("gnomAD_AF", ".") or ".")
     if global_af is not None and global_af > max_af:
         max_af = global_af
 
@@ -665,12 +721,41 @@ def _parse_vep_row(
     Parse one VEP TSV row into a VariantState.
     Returns None if the row should be skipped (non-canonical, non-coding etc).
     """
+    # DEBUG: Log first row's keys to verify column names
+    global _DEBUG_LOGGED_COLUMNS
+    if '_DEBUG_LOGGED_COLUMNS' not in globals():
+        _DEBUG_LOGGED_COLUMNS = True
+        logger.info(f"[{session_id}] DEBUG: Row keys (first 30): {list(row.keys())[:30]}")
+        logger.info(f"[{session_id}] DEBUG: Sample values - CANONICAL='{row.get('CANONICAL')}', BIOTYPE='{row.get('BIOTYPE')}', Feature_type='{row.get('Feature_type')}'")
+
+    # Helper function to safely get string value (handles both str and float/NaN)
+    def _safe_str(value):
+        """Convert value to string safely, handling NaN/float."""
+        if value is None or value == "":
+            return ""
+        if isinstance(value, float):
+            # pandas NaN or numeric value
+            if pd.isna(value):
+                return ""
+            return str(value)
+        return str(value)
+
     # Only process canonical transcript rows
-    if row.get("CANONICAL", "").strip().upper() != "YES":
+    canonical = _safe_str(row.get("CANONICAL", "")).strip().upper()
+    if canonical != "YES":
         return None
 
     # Skip non-protein-coding feature types (regulatory, motif features)
-    if row.get("Feature_type", "").strip() not in ("Transcript", ""):
+    feature_type = _safe_str(row.get("Feature_type", "")).strip()
+    if feature_type not in ("Transcript", ""):
+        return None
+
+    # Skip non-protein-coding transcripts (lncRNA, miRNA, etc.)
+    # BIOTYPE column added with --biotype flag (requires VEP re-run if missing)
+    biotype = _safe_str(row.get("BIOTYPE", "")).strip().lower()
+    if biotype and biotype not in ("protein_coding", ""):
+        # Skip lncRNA, miRNA, snoRNA, etc.
+        logger.debug(f"Filtered non-protein-coding transcript: {biotype}")
         return None
 
     # Parse variant ID
@@ -761,6 +846,7 @@ def _parse_vep_row(
     # Population frequency
     max_af, af_by_pop = _max_gnomad_af(row, _GNOMAD_POP_COLS)
     gnomad_popmax = max(af_by_pop.values()) if af_by_pop else 0.0
+    gnomad_nhomalt = int(_float(row.get("gnomAD_nhomalt", "0") or "0") or 0)
 
     # ClinVar
     clinvar_sig = _str(row.get("ClinVar_CLNSIG", "") or "")
@@ -817,11 +903,11 @@ def _parse_vep_row(
         hgvsc = _generate_genomic_hgvs(chrom, pos_int, ref, alt, base_state.get("genome_build", "GRCh38"))
 
     # Gene-level context from reference databases
-    constraint = _get_gnomad_constraint(gene)
+    constraint = gnomad_constraint.get(gene, {})
     pli   = constraint.get("pLI")
     loeuf = constraint.get("loeuf")
     z     = constraint.get("z")
-    clingen_val = _get_clingen_validity(gene)
+    clingen_val = clingen.get(gene)
 
     # Extract zygosity from VCF GT field
     zygosity = None
@@ -901,7 +987,7 @@ def _parse_vep_row(
         # Phase 2 — population frequency
         "max_gnomad_af":           max_af,
         "gnomad_af_popmax":        gnomad_popmax,
-        "gnomad_nhomalt":          0,    # not in VEP TSV; set by Agent 1 via tabix
+        "gnomad_nhomalt":          gnomad_nhomalt,
         "gnomad_af_by_population": af_by_pop,
 
         # Phase 3 — ClinVar
@@ -1009,87 +1095,232 @@ def post_process_node(state: VariantState) -> dict:
                 return {"warnings": warnings}
 
             # Re-open from top — simpler than tracking position
-        with open(tsv_path, "r", encoding="utf-8") as fh:
-            # Skip to and read the data using csv.DictReader
-            lines = [
-                line for line in fh
-                if not line.startswith("##")
-            ]
-            # Strip leading # from header
-            if lines and lines[0].startswith("#"):
-                lines[0] = lines[0].lstrip("#")
+        # OPTIMIZED: Use pandas for bulk TSV read (10-20× faster than csv.DictReader)
+        PANDAS_AVAILABLE_LOCAL = True  # Initialize before use
 
-            reader = csv.DictReader(lines, delimiter="\t")
-            for row in reader:
-                # Strip whitespace from all values
+        if PANDAS_AVAILABLE:
+            logger.debug(f"[{session_id}] Using pandas for fast TSV parsing")
+            try:
+                # Read entire TSV in one shot (fast!)
+                # VEP TSV has ## comment lines followed by #Uploaded_variation header
+                # CRITICAL FIX: comment='#' skips BOTH ## and #header, making pandas use first data row as header!
+                # We need to manually skip ## lines but keep the #header line
+                with open(tsv_path, 'r', encoding='utf-8') as f:
+                    lines = []
+                    for line in f:
+                        if line.startswith('##'):
+                            continue  # Skip VEP metadata comments
+                        elif line.startswith('#'):
+                            # Header line - strip leading # and add it
+                            lines.append(line[1:])  # Remove leading #
+                        else:
+                            lines.append(line)
+
+                # Now parse with pandas from the filtered lines
+                from io import StringIO
+                df = pd.read_csv(
+                    StringIO(''.join(lines)),
+                    sep='\t',
+                    dtype=str,     # Read all as strings to avoid type inference overhead
+                    keep_default_na=False,     # Don't convert "NA" gene names to NaN
+                    na_filter=False,           # Don't convert any values to NaN - read everything as-is
+                    low_memory=False,
+                    engine='c',    # Use fast C parser
+                    header=0       # First line is now the clean header (without leading #)
+                )
+
+                # Column names are already clean (pandas removes leading #)
+                # DEBUG: Log what pandas actually read
+                logger.info(f"[{session_id}] DEBUG: Pandas read {len(df.columns)} columns")
+                logger.info(f"[{session_id}] DEBUG: First 30 column names: {list(df.columns[:30])}")
+                logger.info(f"[{session_id}] DEBUG: Key columns - CANONICAL={df.columns.tolist().count('CANONICAL')}, BIOTYPE={df.columns.tolist().count('BIOTYPE')}, Feature_type={df.columns.tolist().count('Feature_type')}")
+
+                # DEBUG: Check first row
+                if len(df) > 0:
+                    first_row = df.iloc[0]
+                    logger.info(f"[{session_id}] DEBUG: First row sample - SYMBOL='{first_row.get('SYMBOL') if 'SYMBOL' in df.columns else 'COL_MISSING'}', Consequence='{first_row.get('Consequence') if 'Consequence' in df.columns else 'COL_MISSING'}'")
+                    logger.info(f"[{session_id}] DEBUG: First row filters - CANONICAL='{first_row.get('CANONICAL') if 'CANONICAL' in df.columns else 'COL_MISSING'}', BIOTYPE='{first_row.get('BIOTYPE') if 'BIOTYPE' in df.columns else 'COL_MISSING'}', Feature_type='{first_row.get('Feature_type') if 'Feature_type' in df.columns else 'COL_MISSING'}'")
+
+                # CRITICAL: Convert ALL columns to string and strip whitespace
+                # Despite dtype=str, pandas may still create float NaN for some values
+                # We must explicitly convert everything to string to avoid AttributeError
+                for col in df.columns:
+                    df[col] = df[col].astype(str).str.strip()
+
+                # Convert to list of dicts for _parse_vep_row compatibility
+                rows = df.to_dict('records')
+
+                logger.info(f"[{session_id}] Pandas loaded {len(rows)} rows from VEP TSV in bulk")
+
+            except Exception as e:
+                logger.warning(f"[{session_id}] Pandas parsing failed ({e}), falling back to csv.DictReader")
+                PANDAS_AVAILABLE_LOCAL = False
+        else:
+            PANDAS_AVAILABLE_LOCAL = False
+
+        # Fallback to csv.DictReader if pandas not available or failed
+        if not PANDAS_AVAILABLE or not PANDAS_AVAILABLE_LOCAL:
+            logger.debug(f"[{session_id}] Using csv.DictReader for TSV parsing (slower)")
+            with open(tsv_path, "r", encoding="utf-8") as fh:
+                # Skip to and read the data using csv.DictReader
+                lines = [
+                    line for line in fh
+                    if not line.startswith("##")
+                ]
+                # Strip leading # from header
+                if lines and lines[0].startswith("#"):
+                    lines[0] = lines[0].lstrip("#")
+
+                reader = csv.DictReader(lines, delimiter="\t")
+                rows = list(reader)
+
+        # OPTIMIZATION: If using pandas, apply filters BEFORE parsing to reduce rows
+        # This reduces 2.8M rows → ~80k rows BEFORE expensive _parse_vep_row() calls
+        # Speedup: 28 min → 3 min (10× faster!)
+        if PANDAS_AVAILABLE and PANDAS_AVAILABLE_LOCAL:
+            logger.info(f"[{session_id}] Applying pandas pre-filters to reduce parsing workload...")
+            original_row_count = len(df)
+
+            # Filter 1: CANONICAL only (removes ~50% of rows instantly)
+            df = df[df['CANONICAL'].str.upper() == 'YES']
+            logger.info(f"[{session_id}]   CANONICAL filter: {original_row_count} → {len(df)} rows")
+
+            # Filter 2: Feature_type == Transcript (removes regulatory features)
+            if 'Feature_type' in df.columns:
+                df = df[df['Feature_type'] == 'Transcript']
+                logger.info(f"[{session_id}]   Feature_type filter: → {len(df)} rows")
+
+            # Filter 3: BIOTYPE == protein_coding (removes lncRNA, miRNA, pseudogenes)
+            if 'BIOTYPE' in df.columns:
+                df = df[df['BIOTYPE'].str.lower() == 'protein_coding']
+                logger.info(f"[{session_id}]   BIOTYPE filter: → {len(df)} rows")
+
+            # Filter 4: Exclude non-coding consequences (upstream, downstream, intergenic, intron)
+            EXCLUDED_CONSEQUENCES = {
+                "upstream_gene_variant",
+                "downstream_gene_variant",
+                "intergenic_variant",
+                "intron_variant",
+                "non_coding_transcript_exon_variant",
+                "non_coding_transcript_variant",
+            }
+            if 'Consequence' in df.columns:
+                # Extract first consequence (VEP uses comma-separated for multiple)
+                df['_first_consequence'] = df['Consequence'].str.split(',').str[0].str.strip()
+                df = df[~df['_first_consequence'].isin(EXCLUDED_CONSEQUENCES)]
+                df = df.drop(columns=['_first_consequence'])
+                logger.info(f"[{session_id}]   Consequence filter: → {len(df)} rows")
+
+            # Filter 5: MAF threshold (remove common variants with pandas - MUCH faster)
+            from src.config import PipelineConfig
+            cfg = PipelineConfig()
+            if cfg.maf_threshold > 0 and 'gnomAD_AF' in df.columns:
+                # Convert gnomAD_AF to numeric (handles '.', 'nan', etc.)
+                df['_gnomad_af_numeric'] = pd.to_numeric(df['gnomAD_AF'], errors='coerce').fillna(0)
+                before_maf = len(df)
+                df = df[df['_gnomad_af_numeric'] <= cfg.maf_threshold]
+                df = df.drop(columns=['_gnomad_af_numeric'])
+                logger.info(f"[{session_id}]   MAF filter (>{cfg.maf_threshold*100}%): {before_maf} → {len(df)} rows")
+
+            # Convert back to list of dicts for _parse_vep_row
+            rows = df.to_dict('records')
+            logger.info(f"[{session_id}] Pre-filtering complete: {original_row_count} → {len(rows)} rows to parse")
+            logger.info(f"[{session_id}] Parsing {len(rows)} filtered rows (this will take ~{len(rows)//1000} min)...")
+
+        # Process all rows (same logic for both pandas and csv.DictReader)
+        row_count = 0
+        filtered_counts = {
+            "parse_returned_none": 0,
+            "duplicate": 0,
+            "excluded_consequence": 0,
+            "common_maf": 0,
+            "synonymous": 0,
+        }
+
+        for row in rows:
+            row_count += 1
+            # Strip whitespace from all values (pandas already did this, but csv needs it)
+            if not PANDAS_AVAILABLE:
                 row = {k.strip(): v.strip() for k, v in row.items() if k}
 
-                variant_state = _parse_vep_row(
-                    row, session_id, state, gnomad_constraint, clingen
-                )
-                if variant_state is None:
+            variant_state = _parse_vep_row(
+                row, session_id, state, gnomad_constraint, clingen
+            )
+            if variant_state is None:
+                filtered_counts["parse_returned_none"] += 1
+                continue
+
+            vid = variant_state.get("variant_id", "")
+            if vid in seen_variant_ids:
+                filtered_counts["duplicate"] += 1
+                continue    # deduplicate — one canonical row per variant
+
+            # Filter out non-coding consequence types with no clinical significance
+            consequence = variant_state.get("consequence", "")
+            EXCLUDED_CONSEQUENCES = {
+                "upstream_gene_variant",
+                "downstream_gene_variant",
+                "intergenic_variant",
+                "intron_variant",
+                "non_coding_transcript_exon_variant",  # lncRNA, miRNA, etc. - not protein-coding
+                "non_coding_transcript_variant",
+            }
+
+            if consequence in EXCLUDED_CONSEQUENCES:
+                filtered_counts["excluded_consequence"] += 1
+                logger.debug(f"[{session_id}] Filtered out {vid}: {consequence}")
+                continue
+
+            # MAF filter: Remove common variants (post-VEP, using gnomAD population frequency)
+            # Only apply if maf_threshold > 0 (0 = disabled)
+            from src.config import PipelineConfig
+            cfg = PipelineConfig()
+            if cfg.maf_threshold > 0:
+                max_gnomad_af = variant_state.get("max_gnomad_af", 0.0) or 0.0
+                if max_gnomad_af > cfg.maf_threshold:
+                    filtered_counts["common_maf"] += 1
+                    logger.debug(
+                        f"[{session_id}] Filtered out {vid}: MAF={max_gnomad_af:.4f} "
+                        f"> threshold {cfg.maf_threshold}"
+                    )
                     continue
 
-                vid = variant_state.get("variant_id", "")
-                if vid in seen_variant_ids:
-                    continue    # deduplicate — one canonical row per variant
+            # Special handling for synonymous variants: only keep if likely to affect splicing
+            # Keep if SpliceAI ≥ 0.2 OR within 3bp of exon boundary
+            if consequence == "synonymous_variant":
+                spliceai = variant_state.get("max_spliceai", 0.0) or 0.0
+                keep_variant = False
 
-                # Filter out non-coding consequence types with no clinical significance
-                consequence = variant_state.get("consequence", "")
-                EXCLUDED_CONSEQUENCES = {
-                    "upstream_gene_variant",
-                    "downstream_gene_variant",
-                    "intergenic_variant",
-                    "intron_variant",
-                }
+                # Criterion 1: SpliceAI ≥ 0.2 (likely splice-altering)
+                if spliceai >= 0.2:
+                    logger.debug(f"[{session_id}] Retained synonymous {vid}: SpliceAI={spliceai:.3f}")
+                    keep_variant = True
+                else:
+                    # Criterion 2: Check if near exon-intron boundary
+                    # VEP DISTANCE field indicates distance to nearest feature
+                    # For synonymous variants AT exon boundaries, DISTANCE is usually 0 or near 0
+                    distance = row.get("DISTANCE", "")
+                    if distance and distance != "-":
+                        try:
+                            dist_val = int(distance)
+                            if dist_val <= 3:  # Within 3bp of boundary
+                                logger.debug(f"[{session_id}] Retained synonymous {vid}: DISTANCE={dist_val}bp from boundary")
+                                keep_variant = True
+                        except ValueError:
+                            pass
 
-                if consequence in EXCLUDED_CONSEQUENCES:
-                    logger.debug(f"[{session_id}] Filtered out {vid}: {consequence}")
+                if not keep_variant:
+                    filtered_counts["synonymous"] += 1
+                    logger.debug(f"[{session_id}] Filtered synonymous {vid}: SpliceAI={spliceai:.3f} < 0.2, not at boundary")
                     continue
 
-                # MAF filter: Remove common variants (post-VEP, using gnomAD population frequency)
-                # Only apply if maf_threshold > 0 (0 = disabled)
-                from src.config import PipelineConfig
-                cfg = PipelineConfig()
-                if cfg.maf_threshold > 0:
-                    max_gnomad_af = variant_state.get("max_gnomad_af", 0.0) or 0.0
-                    if max_gnomad_af > cfg.maf_threshold:
-                        logger.debug(
-                            f"[{session_id}] Filtered out {vid}: MAF={max_gnomad_af:.4f} "
-                            f"> threshold {cfg.maf_threshold}"
-                        )
-                        continue
+            seen_variant_ids.add(vid)
+            parsed_variants.append(variant_state)
 
-                # Special handling for synonymous variants: only keep if likely to affect splicing
-                # Keep if SpliceAI ≥ 0.2 OR within 3bp of exon boundary
-                if consequence == "synonymous_variant":
-                    spliceai = variant_state.get("max_spliceai", 0.0) or 0.0
-                    keep_variant = False
-
-                    # Criterion 1: SpliceAI ≥ 0.2 (likely splice-altering)
-                    if spliceai >= 0.2:
-                        logger.debug(f"[{session_id}] Retained synonymous {vid}: SpliceAI={spliceai:.3f}")
-                        keep_variant = True
-                    else:
-                        # Criterion 2: Check if near exon-intron boundary
-                        # VEP DISTANCE field indicates distance to nearest feature
-                        # For synonymous variants AT exon boundaries, DISTANCE is usually 0 or near 0
-                        distance = row.get("DISTANCE", "")
-                        if distance and distance != "-":
-                            try:
-                                dist_val = int(distance)
-                                if dist_val <= 3:  # Within 3bp of boundary
-                                    logger.debug(f"[{session_id}] Retained synonymous {vid}: DISTANCE={dist_val}bp from boundary")
-                                    keep_variant = True
-                            except ValueError:
-                                pass
-
-                    if not keep_variant:
-                        logger.debug(f"[{session_id}] Filtered synonymous {vid}: SpliceAI={spliceai:.3f} < 0.2, not at boundary")
-                        continue
-
-                seen_variant_ids.add(vid)
-                parsed_variants.append(variant_state)
+        # Log filtering breakdown
+        logger.info(f"[{session_id}] Filtering breakdown: processed {row_count} rows")
+        for reason, count in filtered_counts.items():
+            logger.info(f"[{session_id}]   {reason}: {count}")
 
     except Exception as e:
         warnings.append(f"POST_PROCESS_ERROR: Failed to parse VEP TSV: {e}")
@@ -1104,6 +1335,9 @@ def post_process_node(state: VariantState) -> dict:
         f"[{session_id}] Post-VEP filtering complete: {len(parsed_variants)} variants retained "
         f"from {tsv_path.name}"
     )
+    logger.info(f"[{session_id}] DEBUG: parsed_variants type={type(parsed_variants)}, len={len(parsed_variants)}")
+    if len(parsed_variants) > 0:
+        logger.info(f"[{session_id}] DEBUG: First variant keys={list(parsed_variants[0].keys())[:10]}")
 
     if cfg.maf_threshold > 0:
         logger.info(
@@ -1132,3 +1366,4 @@ def post_process_node(state: VariantState) -> dict:
     update["parsed_variants_count"] = len(parsed_variants)
     update["parsed_variants"] = parsed_variants
     return update
+

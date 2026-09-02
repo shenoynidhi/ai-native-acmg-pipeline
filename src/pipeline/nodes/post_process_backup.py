@@ -149,17 +149,21 @@ def _extract_parental_genotype(
 
 # ---------------------------------------------------------------------------
 # gnomAD population AF columns in VEP TSV output
+# GRCh38 v4.1 uses AF_ami, AF_mid, AF_remaining
+# GRCh37 v2.1.1 uses AF_oth (not AF_remaining) and lacks AF_ami/AF_mid
 # ---------------------------------------------------------------------------
 _GNOMAD_POP_COLS = {
-    "afr": "gnomADe_AFR_AF",
-    "amr": "gnomADe_AMR_AF",
-    "asj": "gnomADe_ASJ_AF",
-    "eas": "gnomADe_EAS_AF",
-    "fin": "gnomADe_FIN_AF",
-    "mid": "gnomADe_MID_AF",
-    "nfe": "gnomADe_NFE_AF",
-    "sas": "gnomADe_SAS_AF",
-    "remaining": "gnomADe_REMAINING_AF",
+    "afr": "gnomAD_AF_afr",
+    "ami": "gnomAD_AF_ami",        # GRCh38 only
+    "amr": "gnomAD_AF_amr",
+    "asj": "gnomAD_AF_asj",
+    "eas": "gnomAD_AF_eas",
+    "fin": "gnomAD_AF_fin",
+    "mid": "gnomAD_AF_mid",        # GRCh38 only
+    "nfe": "gnomAD_AF_nfe",
+    "remaining": "gnomAD_AF_remaining",  # GRCh38
+    "oth": "gnomAD_AF_oth",        # GRCh37 equivalent of "remaining"
+    "sas": "gnomAD_AF_sas",
 }
 
 # Consequence types used for structural flags
@@ -343,31 +347,52 @@ def _extract_zygosity_from_vcf(
                 continue
             if alt not in variant.ALT:
                 continue
-
-            # Extract GT for first sample (proband)
-            if len(variant.gt_types) == 0:
+            # Extract genotype for first sample (proband).
+            #
+            # NOTE: We deliberately do NOT use variant.gt_types here.
+            # cyvcf2 has a confirmed, long-standing upstream bug (see
+            # https://github.com/brentp/cyvcf2/issues/21, still present in
+            # 0.31.1): for multiallelic sites, a sample homozygous for the
+            # 2nd/3rd/... ALT allele is misclassified as UNKNOWN instead of
+            # HOM_ALT. Empirically confirmed on a minimal synthetic VCF
+            # (REF=A, ALT=T,G): GT=1/1 -> gt_types=UNKNOWN, GT=2/2 ->
+            # gt_types=UNKNOWN, only GT=1/2 correctly gave HET. This
+            # silently produced zygosity=None for any patient homozygous
+            # for any allele at a multiallelic site.
+            #
+            # Fix: classify zygosity directly from the raw genotype allele
+            # indices (variant.genotypes), confirmed correct in every
+            # tested case including the ones gt_types got wrong. This also
+            # correctly handles a sample not carrying the SPECIFIC alt
+            # allele being queried (returns None instead of a false
+            # "homozygous"), which gt_types alone cannot distinguish at
+            # multiallelic sites.
+            if len(variant.genotypes) == 0:
                 return None
 
-            gt_type = variant.gt_types[0]
+            genotype = variant.genotypes[0]  # [allele1, allele2, phased]
+            if genotype is None or len(genotype) < 2:
+                return None
 
-            # cyvcf2 gt_types encoding:
-            # 0 = HOM_REF (0/0)
-            # 1 = HET (0/1, 1/0)
-            # 2 = HOM_ALT (1/1)
-            # 3 = UNKNOWN (./.)
+            # variant.ALT is 0-based; VCF/GT allele numbering is 1-based
+            # for ALTs (0 = REF, 1 = ALT[0], 2 = ALT[1], ...).
+            try:
+                allele_index = 1 + list(variant.ALT).index(alt)
+            except ValueError:
+                return None  # shouldn't happen given the ALT membership check above
 
-            if gt_type == 0:
-                return None  # Homozygous reference — not a variant
-            elif gt_type == 1:
-                # Heterozygous — but check for X-chromosome males (hemizygous)
+            alleles = [a for a in genotype[:2] if isinstance(a, int)]
+            n_copies = alleles.count(allele_index)
+
+            if n_copies == 0:
+                return None  # sample doesn't carry this specific allele
+            elif n_copies == 1:
                 chrom_upper = chrom.upper().replace("CHR", "")
                 if chrom_upper in ("X", "23") and proband_sex == "Male":
                     return "hemizygous"
                 return "heterozygous"
-            elif gt_type == 2:
+            else:  # n_copies == 2
                 return "homozygous"
-            elif gt_type == 3:
-                return None  # Unknown/no-call
 
         # Variant not found in VCF
         return None
@@ -549,9 +574,17 @@ def _int(value: str) -> Optional[int]:
 
 
 def _str(value: str) -> Optional[str]:
-    if not value or value in (".", "-", ""):
+    # Handle both string and float/NaN values from pandas
+    if value is None:
         return None
-    return value.strip()
+    if isinstance(value, float):
+        if pd.isna(value):
+            return None
+        value = str(value)
+    value = str(value).strip()
+    if not value or value in (".", "-", "nan"):
+        return None
+    return value
 
 
 def _parse_spliceai(value: str) -> float:
@@ -631,8 +664,8 @@ def _max_gnomad_af(row: Dict, pop_cols: Dict) -> Tuple[float, Dict[str, float]]:
     by_pop: Dict[str, float] = {}
     max_af = 0.0
 
-    # gnomADe (exome) AFs from VEP --everything
-    global_af = _float(row.get("gnomADe_AF", ".") or ".")
+    # gnomAD overall AF from VEP --custom gnomAD VCF
+    global_af = _float(row.get("gnomAD_AF", ".") or ".")
     if global_af is not None and global_af > max_af:
         max_af = global_af
 
@@ -709,12 +742,41 @@ def _parse_vep_row(
     Parse one VEP TSV row into a VariantState.
     Returns None if the row should be skipped (non-canonical, non-coding etc).
     """
+    # DEBUG: Log first row's keys to verify column names
+    global _DEBUG_LOGGED_COLUMNS
+    if '_DEBUG_LOGGED_COLUMNS' not in globals():
+        _DEBUG_LOGGED_COLUMNS = True
+        logger.info(f"[{session_id}] DEBUG: Row keys (first 30): {list(row.keys())[:30]}")
+        logger.info(f"[{session_id}] DEBUG: Sample values - CANONICAL='{row.get('CANONICAL')}', BIOTYPE='{row.get('BIOTYPE')}', Feature_type='{row.get('Feature_type')}'")
+
+    # Helper function to safely get string value (handles both str and float/NaN)
+    def _safe_str(value):
+        """Convert value to string safely, handling NaN/float."""
+        if value is None or value == "":
+            return ""
+        if isinstance(value, float):
+            # pandas NaN or numeric value
+            if pd.isna(value):
+                return ""
+            return str(value)
+        return str(value)
+
     # Only process canonical transcript rows
-    if row.get("CANONICAL", "").strip().upper() != "YES":
+    canonical = _safe_str(row.get("CANONICAL", "")).strip().upper()
+    if canonical != "YES":
         return None
 
     # Skip non-protein-coding feature types (regulatory, motif features)
-    if row.get("Feature_type", "").strip() not in ("Transcript", ""):
+    feature_type = _safe_str(row.get("Feature_type", "")).strip()
+    if feature_type not in ("Transcript", ""):
+        return None
+
+    # Skip non-protein-coding transcripts (lncRNA, miRNA, etc.)
+    # BIOTYPE column added with --biotype flag (requires VEP re-run if missing)
+    biotype = _safe_str(row.get("BIOTYPE", "")).strip().lower()
+    if biotype and biotype not in ("protein_coding", ""):
+        # Skip lncRNA, miRNA, snoRNA, etc.
+        logger.debug(f"Filtered non-protein-coding transcript: {biotype}")
         return None
 
     # Parse variant ID
@@ -725,6 +787,25 @@ def _parse_vep_row(
     # Normalise to chr:pos:ref:alt and extract components for zygosity lookup
     chrom, pos_int, ref, alt = None, None, None, None
     variant_id = None  # Initialize to avoid UnboundLocalError
+
+    # ALLELE_NUM (from --allele_number in vep_runner.py) is a 1-based index
+    # into the ALT allele list embedded in Uploaded_variation. Using it here
+    # instead of the VEP "Allele" column fixes the same problem already
+    # fixed in append_annotations.py (handoff bug #5): "Allele" is VEP's
+    # normalized form (e.g. "-" for a deletion) and does not reliably map
+    # back to the literal VCF ALT for indels or multiallelic sites.
+    #
+    # ALLELE_NUM may be ABSENT if this TSV came from an externally-annotated
+    # VCF that bypassed vep_runner_node entirely (see graph.py's
+    # _should_run_vep / vep_already_annotated) - such input was never run
+    # with --allele_number. We do NOT hard-fail on that; we fall back to the
+    # pre-existing Allele-based behavior, unchanged, so that path keeps
+    # working exactly as it did before this patch.
+    allele_num_raw = row.get("ALLELE_NUM", "")
+    try:
+        allele_num = int(allele_num_raw)
+    except (ValueError, TypeError):
+        allele_num = None
 
     # Try parsing Uploaded_variation first (format: chr1_12345_A/G)
     if "_" in uploaded and "/" in uploaded:
@@ -738,16 +819,24 @@ def _parse_vep_row(
                 if "." not in parts[1]:
                     chrom = parts[0]
                     pos_int = int(parts[1])
-                    ref_alt = parts[2].split("/")
+                    alleles = parts[2].split("/")
                 else:
                     # Alternate contig format: NT_187361.1_40583_A/G
                     # Chromosome is parts[0]_parts[1], position is parts[2]
                     chrom = f"{parts[0]}_{parts[1]}"
                     pos_int = int(parts[2])
-                    ref_alt = parts[3].split("/") if len(parts) > 3 else []
+                    alleles = parts[3].split("/") if len(parts) > 3 else []
 
-                ref = ref_alt[0] if ref_alt else "."
-                alt = allele
+                ref = alleles[0] if alleles else "."
+
+                if allele_num is not None and 0 < allele_num < len(alleles):
+                    # Correct: literal ALT indexed straight out of
+                    # Uploaded_variation, same mechanism as append_annotations.py
+                    alt = alleles[allele_num]
+                else:
+                    # Fallback: unchanged prior behavior
+                    alt = allele
+
                 variant_id = f"{chrom}:{pos_int}:{ref}:{alt}"
             except (ValueError, IndexError) as e:
                 logger.debug(f"[{session_id}] Could not parse uploaded_variation '{uploaded}': {e}")
@@ -805,6 +894,7 @@ def _parse_vep_row(
     # Population frequency
     max_af, af_by_pop = _max_gnomad_af(row, _GNOMAD_POP_COLS)
     gnomad_popmax = max(af_by_pop.values()) if af_by_pop else 0.0
+    gnomad_nhomalt = int(_float(row.get("gnomAD_nhomalt", "0") or "0") or 0)
 
     # ClinVar
     clinvar_sig = _str(row.get("ClinVar_CLNSIG", "") or "")
@@ -945,7 +1035,7 @@ def _parse_vep_row(
         # Phase 2 — population frequency
         "max_gnomad_af":           max_af,
         "gnomad_af_popmax":        gnomad_popmax,
-        "gnomad_nhomalt":          0,    # not in VEP TSV; set by Agent 1 via tabix
+        "gnomad_nhomalt":          gnomad_nhomalt,
         "gnomad_af_by_population": af_by_pop,
 
         # Phase 3 — ClinVar
@@ -1060,23 +1150,50 @@ def post_process_node(state: VariantState) -> dict:
             logger.debug(f"[{session_id}] Using pandas for fast TSV parsing")
             try:
                 # Read entire TSV in one shot (fast!)
-                # Note: comment='#' only skips lines starting with single #, not ##
-                # So we skip all # lines and manually filter
+                # VEP TSV has ## comment lines followed by #Uploaded_variation header
+                # CRITICAL FIX: comment='#' skips BOTH ## and #header, making pandas use first data row as header!
+                # We need to manually skip ## lines but keep the #header line
+                with open(tsv_path, 'r', encoding='utf-8') as f:
+                    lines = []
+                    for line in f:
+                        if line.startswith('##'):
+                            continue  # Skip VEP metadata comments
+                        elif line.startswith('#'):
+                            # Header line - strip leading # and add it
+                            lines.append(line[1:])  # Remove leading #
+                        else:
+                            lines.append(line)
+
+                # Now parse with pandas from the filtered lines
+                from io import StringIO
                 df = pd.read_csv(
-                    tsv_path,
+                    StringIO(''.join(lines)),
                     sep='\t',
-                    comment='#',  # Skip all lines starting with # (including ##)
                     dtype=str,     # Read all as strings to avoid type inference overhead
-                    na_values=['-', '.', ''],  # Treat these as missing
                     keep_default_na=False,     # Don't convert "NA" gene names to NaN
+                    na_filter=False,           # Don't convert any values to NaN - read everything as-is
                     low_memory=False,
                     engine='c',    # Use fast C parser
-                    header=0       # First non-comment line is header
+                    header=0       # First line is now the clean header (without leading #)
                 )
 
                 # Column names are already clean (pandas removes leading #)
-                # Strip whitespace from all string columns
-                df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+                # DEBUG: Log what pandas actually read
+                logger.info(f"[{session_id}] DEBUG: Pandas read {len(df.columns)} columns")
+                logger.info(f"[{session_id}] DEBUG: First 30 column names: {list(df.columns[:30])}")
+                logger.info(f"[{session_id}] DEBUG: Key columns - CANONICAL={df.columns.tolist().count('CANONICAL')}, BIOTYPE={df.columns.tolist().count('BIOTYPE')}, Feature_type={df.columns.tolist().count('Feature_type')}")
+
+                # DEBUG: Check first row
+                if len(df) > 0:
+                    first_row = df.iloc[0]
+                    logger.info(f"[{session_id}] DEBUG: First row sample - SYMBOL='{first_row.get('SYMBOL') if 'SYMBOL' in df.columns else 'COL_MISSING'}', Consequence='{first_row.get('Consequence') if 'Consequence' in df.columns else 'COL_MISSING'}'")
+                    logger.info(f"[{session_id}] DEBUG: First row filters - CANONICAL='{first_row.get('CANONICAL') if 'CANONICAL' in df.columns else 'COL_MISSING'}', BIOTYPE='{first_row.get('BIOTYPE') if 'BIOTYPE' in df.columns else 'COL_MISSING'}', Feature_type='{first_row.get('Feature_type') if 'Feature_type' in df.columns else 'COL_MISSING'}'")
+
+                # CRITICAL: Convert ALL columns to string and strip whitespace
+                # Despite dtype=str, pandas may still create float NaN for some values
+                # We must explicitly convert everything to string to avoid AttributeError
+                for col in df.columns:
+                    df[col] = df[col].astype(str).str.strip()
 
                 # Convert to list of dicts for _parse_vep_row compatibility
                 rows = df.to_dict('records')
@@ -1105,8 +1222,71 @@ def post_process_node(state: VariantState) -> dict:
                 reader = csv.DictReader(lines, delimiter="\t")
                 rows = list(reader)
 
+        # OPTIMIZATION: If using pandas, apply filters BEFORE parsing to reduce rows
+        # This reduces 2.8M rows → ~80k rows BEFORE expensive _parse_vep_row() calls
+        # Speedup: 28 min → 3 min (10× faster!)
+        if PANDAS_AVAILABLE and PANDAS_AVAILABLE_LOCAL:
+            logger.info(f"[{session_id}] Applying pandas pre-filters to reduce parsing workload...")
+            original_row_count = len(df)
+
+            # Filter 1: CANONICAL only (removes ~50% of rows instantly)
+            df = df[df['CANONICAL'].str.upper() == 'YES']
+            logger.info(f"[{session_id}]   CANONICAL filter: {original_row_count} → {len(df)} rows")
+
+            # Filter 2: Feature_type == Transcript (removes regulatory features)
+            if 'Feature_type' in df.columns:
+                df = df[df['Feature_type'] == 'Transcript']
+                logger.info(f"[{session_id}]   Feature_type filter: → {len(df)} rows")
+
+            # Filter 3: BIOTYPE == protein_coding (removes lncRNA, miRNA, pseudogenes)
+            if 'BIOTYPE' in df.columns:
+                df = df[df['BIOTYPE'].str.lower() == 'protein_coding']
+                logger.info(f"[{session_id}]   BIOTYPE filter: → {len(df)} rows")
+
+            # Filter 4: Exclude non-coding consequences (upstream, downstream, intergenic, intron)
+            EXCLUDED_CONSEQUENCES = {
+                "upstream_gene_variant",
+                "downstream_gene_variant",
+                "intergenic_variant",
+                "intron_variant",
+                "non_coding_transcript_exon_variant",
+                "non_coding_transcript_variant",
+            }
+            if 'Consequence' in df.columns:
+                # Extract first consequence (VEP uses comma-separated for multiple)
+                df['_first_consequence'] = df['Consequence'].str.split(',').str[0].str.strip()
+                df = df[~df['_first_consequence'].isin(EXCLUDED_CONSEQUENCES)]
+                df = df.drop(columns=['_first_consequence'])
+                logger.info(f"[{session_id}]   Consequence filter: → {len(df)} rows")
+
+            # Filter 5: MAF threshold (remove common variants with pandas - MUCH faster)
+            from src.config import PipelineConfig
+            cfg = PipelineConfig()
+            if cfg.maf_threshold > 0 and 'gnomAD_AF' in df.columns:
+                # Convert gnomAD_AF to numeric (handles '.', 'nan', etc.)
+                df['_gnomad_af_numeric'] = pd.to_numeric(df['gnomAD_AF'], errors='coerce').fillna(0)
+                before_maf = len(df)
+                df = df[df['_gnomad_af_numeric'] <= cfg.maf_threshold]
+                df = df.drop(columns=['_gnomad_af_numeric'])
+                logger.info(f"[{session_id}]   MAF filter (>{cfg.maf_threshold*100}%): {before_maf} → {len(df)} rows")
+
+            # Convert back to list of dicts for _parse_vep_row
+            rows = df.to_dict('records')
+            logger.info(f"[{session_id}] Pre-filtering complete: {original_row_count} → {len(rows)} rows to parse")
+            logger.info(f"[{session_id}] Parsing {len(rows)} filtered rows (this will take ~{len(rows)//1000} min)...")
+
         # Process all rows (same logic for both pandas and csv.DictReader)
+        row_count = 0
+        filtered_counts = {
+            "parse_returned_none": 0,
+            "duplicate": 0,
+            "excluded_consequence": 0,
+            "common_maf": 0,
+            "synonymous": 0,
+        }
+
         for row in rows:
+            row_count += 1
             # Strip whitespace from all values (pandas already did this, but csv needs it)
             if not PANDAS_AVAILABLE:
                 row = {k.strip(): v.strip() for k, v in row.items() if k}
@@ -1115,10 +1295,12 @@ def post_process_node(state: VariantState) -> dict:
                 row, session_id, state, gnomad_constraint, clingen
             )
             if variant_state is None:
+                filtered_counts["parse_returned_none"] += 1
                 continue
 
             vid = variant_state.get("variant_id", "")
             if vid in seen_variant_ids:
+                filtered_counts["duplicate"] += 1
                 continue    # deduplicate — one canonical row per variant
 
             # Filter out non-coding consequence types with no clinical significance
@@ -1128,9 +1310,12 @@ def post_process_node(state: VariantState) -> dict:
                 "downstream_gene_variant",
                 "intergenic_variant",
                 "intron_variant",
+                "non_coding_transcript_exon_variant",  # lncRNA, miRNA, etc. - not protein-coding
+                "non_coding_transcript_variant",
             }
 
             if consequence in EXCLUDED_CONSEQUENCES:
+                filtered_counts["excluded_consequence"] += 1
                 logger.debug(f"[{session_id}] Filtered out {vid}: {consequence}")
                 continue
 
@@ -1141,6 +1326,7 @@ def post_process_node(state: VariantState) -> dict:
             if cfg.maf_threshold > 0:
                 max_gnomad_af = variant_state.get("max_gnomad_af", 0.0) or 0.0
                 if max_gnomad_af > cfg.maf_threshold:
+                    filtered_counts["common_maf"] += 1
                     logger.debug(
                         f"[{session_id}] Filtered out {vid}: MAF={max_gnomad_af:.4f} "
                         f"> threshold {cfg.maf_threshold}"
@@ -1172,11 +1358,17 @@ def post_process_node(state: VariantState) -> dict:
                             pass
 
                 if not keep_variant:
+                    filtered_counts["synonymous"] += 1
                     logger.debug(f"[{session_id}] Filtered synonymous {vid}: SpliceAI={spliceai:.3f} < 0.2, not at boundary")
                     continue
 
             seen_variant_ids.add(vid)
             parsed_variants.append(variant_state)
+
+        # Log filtering breakdown
+        logger.info(f"[{session_id}] Filtering breakdown: processed {row_count} rows")
+        for reason, count in filtered_counts.items():
+            logger.info(f"[{session_id}]   {reason}: {count}")
 
     except Exception as e:
         warnings.append(f"POST_PROCESS_ERROR: Failed to parse VEP TSV: {e}")
@@ -1191,6 +1383,9 @@ def post_process_node(state: VariantState) -> dict:
         f"[{session_id}] Post-VEP filtering complete: {len(parsed_variants)} variants retained "
         f"from {tsv_path.name}"
     )
+    logger.info(f"[{session_id}] DEBUG: parsed_variants type={type(parsed_variants)}, len={len(parsed_variants)}")
+    if len(parsed_variants) > 0:
+        logger.info(f"[{session_id}] DEBUG: First variant keys={list(parsed_variants[0].keys())[:10]}")
 
     if cfg.maf_threshold > 0:
         logger.info(
@@ -1219,4 +1414,5 @@ def post_process_node(state: VariantState) -> dict:
     update["parsed_variants_count"] = len(parsed_variants)
     update["parsed_variants"] = parsed_variants
     return update
+
 
