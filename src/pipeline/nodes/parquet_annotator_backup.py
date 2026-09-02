@@ -334,24 +334,9 @@ class ParquetAnnotator:
             return {}
 
         result = {}
-        # dbNSFP fields split into two groups based on empirical evidence
-        # from the ground-truth comparison: REVEL/Polyphen2/SIFT/MutationTaster
-        # genuinely vary per-transcript (confirmed - values at the correct
-        # list-index matched ground truth exactly, e.g. REVEL_score=0.145
-        # for ENST00000342066 at index 5 of an 11-transcript list). But
-        # CADD_phred/phyloP100way_vertebrate/GERP++_RS/MetaSVM_score are
-        # VARIANT-level in dbNSFP - one score regardless of transcript -
-        # confirmed by ground truth showing the identical value repeated
-        # across all 11 transcript rows for the same variant. Applying
-        # transcript-index resolution to these caused `idx < len(scores)`
-        # to silently fail for every transcript except the one at index 0,
-        # wrongly blanking a correct, real score for ~91% of rows on a
-        # variant with 11 overlapping transcripts.
-        TRANSCRIPT_SPECIFIC_COLUMNS = [
-            "REVEL_score", "Polyphen2_HDIV_score", "SIFT_score", "MutationTaster_pred",
-        ]
-        VARIANT_LEVEL_COLUMNS = [
-            "CADD_phred", "phyloP100way_vertebrate", "GERP++_RS", "MetaSVM_score",
+        score_columns = [
+            "REVEL_score", "CADD_phred", "Polyphen2_HDIV_score", "SIFT_score",
+            "phyloP100way_vertebrate", "GERP++_RS", "MutationTaster_pred", "MetaSVM_score"
         ]
         di = self._dbnsfp_col_idx
 
@@ -391,7 +376,7 @@ class ParquetAnnotator:
 
                 continue
 
-            for col in TRANSCRIPT_SPECIFIC_COLUMNS:
+            for col in score_columns:
                 score_str = str(row[di[col]]) if col in di else ""
                 if not score_str or score_str == "nan":
                     result[col] = ""
@@ -403,30 +388,14 @@ class ParquetAnnotator:
                 else:
                     result[col] = ""
 
-            for col in VARIANT_LEVEL_COLUMNS:
-                # No transcript-index resolution - this is one value for
-                # the whole variant, applies to every transcript row.
-                score_str = str(row[di[col]]) if col in di else ""
-                result[col] = "" if (not score_str or score_str == "nan") else score_str
-
             break
 
         return result
 
 
-    def lookup_spliceai(self, chrom: str, pos: int, ref: str, alt: str,
-                         variant_class: str, gene_symbol: str = "") -> Dict[str, str]:
+    def lookup_spliceai(self, chrom: str, pos: int, ref: str, alt: str, variant_class: str) -> Dict[str, str]:
         """
         Lookup SpliceAI scores for a variant using ON-DEMAND parquet read.
-
-        gene_symbol disambiguates when multiple genes overlap the same
-        position (SpliceAI reports one row per nearby gene). Confirmed via
-        ground-truth comparison: taking iloc[0] unconditionally returned a
-        DIFFERENT gene's prediction than VEP's plugin (AL645608.1 instead of
-        the correct SAMD11) for a real test variant - not a formatting
-        difference, genuinely wrong data. VEP's plugin ties each row's
-        SpliceAI prediction to the same gene as the transcript being
-        annotated; we need to do the same.
         """
         is_snv = variant_class == "SNV"
         chunks_dir = self.spliceai_snv_path if is_snv else self.spliceai_indel_path
@@ -459,47 +428,8 @@ class ParquetAnnotator:
         if df.empty:
             return {}
 
-        if gene_symbol:
-            # Always check gene match when we have a gene context, even
-            # with only one candidate row. A single overlapping row is not
-            # necessarily the RIGHT row - confirmed via ground truth: a
-            # single SAMD11 SpliceAI row existed at a position where the
-            # transcript being annotated belonged to a different gene, and
-            # the parquet lookup wrongly returned SAMD11's prediction for
-            # it because "only one candidate" was being treated as "the
-            # correct candidate". VEP's plugin correctly returned nothing
-            # in that case; we now match that behavior.
-            gene_matches = df[df["SYMBOL"] == gene_symbol]
-            if not gene_matches.empty:
-                row = gene_matches.iloc[0]
-            else:
-                if not hasattr(self, "_spliceai_gene_miss_debug"):
-                    self._spliceai_gene_miss_debug = 0
-                if self._spliceai_gene_miss_debug < 5:
-                    logger.warning(
-                        "[SpliceAI] %s:%s %s>%s has %d overlapping row(s), "
-                        "none match gene_symbol=%r (available: %s) - "
-                        "returning no SpliceAI annotation rather than "
-                        "guessing which gene is correct",
-                        chrom, pos, ref, alt, len(df), gene_symbol,
-                        sorted(df["SYMBOL"].unique().tolist()),
-                    )
-                    self._spliceai_gene_miss_debug += 1
-                return {}
-        else:
-            # No gene context available at all (e.g. intergenic VEP row
-            # with no SYMBOL) - nothing to match against, fall back to
-            # first row. This is the one remaining case where we can't
-            # fully replicate plugin behavior; monitor how often this
-            # branch actually fires before trusting it blindly.
-            row = df.iloc[0]
+        row = df.iloc[0]
 
-        # Confirmed via ground truth: standard VEP SpliceAI plugin format is
-        # "SYMBOL|DS_AG|DS_AL|DS_DG|DS_DL|DP_AG|DP_AL|DP_DG|DP_DL" (9 fields,
-        # NO leading ALLELE). A prior fix here added an ALLELE prefix based
-        # on an unverified assumption about the standard plugin format -
-        # that assumption was wrong, confirmed against a real ground-truth
-        # VEP+plugin run. Reverted.
         symbol = str(row.get("SYMBOL", ""))
         ds_ag = row.get("DS_AG", 0.0)
         ds_al = row.get("DS_AL", 0.0)
@@ -510,10 +440,7 @@ class ParquetAnnotator:
         dp_dg = int(row.get("DP_DG", 0))
         dp_dl = int(row.get("DP_DL", 0))
 
-        spliceai_pred = (
-            f"{symbol}|{ds_ag:.2f}|{ds_al:.2f}|{ds_dg:.2f}|{ds_dl:.2f}|"
-            f"{dp_ag}|{dp_al}|{dp_dg}|{dp_dl}"
-        )
+        spliceai_pred = f"{symbol}|{ds_ag:.2f}|{ds_al:.2f}|{ds_dg:.2f}|{ds_dl:.2f}|{dp_ag}|{dp_al}|{dp_dg}|{dp_dl}"
 
         return {"SpliceAI_pred": spliceai_pred}
 
@@ -525,16 +452,10 @@ class ParquetAnnotator:
         ref: str,
         alt: str,
         transcript_id: str,
-        variant_class: str,
-        gene_symbol: str = "",
+        variant_class: str
     ) -> Dict[str, str]:
         """
         Lookup all annotations for a single variant.
-
-        gene_symbol is used only by lookup_spliceai(), to disambiguate
-        between multiple genes overlapping the same position - see that
-        function's docstring for why this matters (it's a correctness fix,
-        not cosmetic).
 
         Returns merged dict with all annotation fields.
         """
@@ -543,8 +464,8 @@ class ParquetAnnotator:
 
         if self._annotate_debug < 5:
             logger.info(
-                "[DEBUG annotate_variant] %s:%s %s>%s transcript=%s class=%s gene=%s",
-                chrom, pos, ref, alt, transcript_id, variant_class, gene_symbol,
+                "[DEBUG annotate_variant] %s:%s %s>%s transcript=%s class=%s",
+                chrom, pos, ref, alt, transcript_id, variant_class,
             )
             self._annotate_debug += 1
 
@@ -552,6 +473,6 @@ class ParquetAnnotator:
 
         annotations.update(self.lookup_clinvar(chrom, pos, ref, alt))
         annotations.update(self.lookup_dbnsfp(chrom, pos, ref, alt, transcript_id))
-        annotations.update(self.lookup_spliceai(chrom, pos, ref, alt, variant_class, gene_symbol))
+        annotations.update(self.lookup_spliceai(chrom, pos, ref, alt, variant_class))
 
         return annotations

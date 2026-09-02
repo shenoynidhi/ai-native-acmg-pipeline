@@ -183,7 +183,7 @@ def append_annotations_node(state: VariantState) -> dict:
 
     # Sanity check: fail loudly instead of silently producing 0 annotations
     # if the columns we depend on aren't present.
-    required_columns = ["Uploaded_variation", "ALLELE_NUM", "Feature", "VARIANT_CLASS", "SYMBOL"]
+    required_columns = ["Uploaded_variation", "Feature", "VARIANT_CLASS"]
     missing_required = [c for c in required_columns if c not in df.columns]
     if missing_required:
         logger.error(
@@ -233,21 +233,9 @@ def append_annotations_node(state: VariantState) -> dict:
     # We parse chrom/pos/ref/alt straight from that instead - no VCF
     # re-lookup needed at all, and no indel mismatch.
 
-    # NOTE: Uploaded_variation is NOT unique per ALT allele for multiallelic
-    # VCF records - both alleles of "1 1035169 TGG T,TG" share the identical
-    # string "1_1035169_TGG/T/TG". VEP's Allele column disambiguates *which
-    # transcript consequence* a row belongs to, but it's VEP's normalized
-    # form ("-", "G") and does NOT map back to the literal VCF ALT ("T", "TG")
-    # by string equality. ALLELE_NUM (from --allele_number in vep_runner.py)
-    # is a 1-based index into the ALT list in VCF order - confirmed correct
-    # against 5 real multiallelic test variants covering SNV/insertion/
-    # deletion/multi-base indels. alleles[0] is REF, alleles[ALLELE_NUM] is
-    # the correct literal ALT for this row.
-
     annotated_count = 0
 
     missing_uploaded_variation = 0
-    missing_allele_num = 0
 
     for idx, row in df.iterrows():
         if idx < 5:
@@ -255,7 +243,7 @@ def append_annotations_node(state: VariantState) -> dict:
 
         uploaded = str(row.get("Uploaded_variation", ""))
 
-        # Expected format: "chrom_pos_REF/ALT1/ALT2/.../ALTn"
+        # Expected format: "chrom_pos_ref/alt", e.g. "chr1_923311_TG/T"
         # maxsplit=2 protects against any stray underscores in contig names
         parts = uploaded.split("_", 2)
         if len(parts) != 3 or "/" not in parts[2]:
@@ -263,7 +251,7 @@ def append_annotations_node(state: VariantState) -> dict:
             if missing_uploaded_variation <= 10:
                 logger.warning(
                     f"[{session_id}] Row {idx}: unparseable Uploaded_variation "
-                    f"{uploaded!r} - expected 'chrom_pos_ref/alt[/alt2/...]' "
+                    f"{uploaded!r} - expected 'chrom_pos_ref/alt' "
                     f"(is the VCF ID column blanked before VEP?)"
                 )
             continue
@@ -278,36 +266,12 @@ def append_annotations_node(state: VariantState) -> dict:
                 logger.warning(f"[DEBUG] Row {idx} has unparseable pos: {pos_part!r}")
             continue
 
-        alleles = ref_alt_part.split("/")
-        ref = alleles[0]
-
-        allele_num_raw = row.get("ALLELE_NUM", "")
-        try:
-            allele_num = int(allele_num_raw)
-        except (ValueError, TypeError):
-            missing_allele_num += 1
-            if missing_allele_num <= 10:
-                logger.warning(
-                    f"[{session_id}] Row {idx}: unparseable ALLELE_NUM "
-                    f"{allele_num_raw!r} for {uploaded!r} - skipping"
-                )
-            continue
-
-        if allele_num < 1 or allele_num >= len(alleles):
-            missing_allele_num += 1
-            if missing_allele_num <= 10:
-                logger.warning(
-                    f"[{session_id}] Row {idx}: ALLELE_NUM={allele_num} out of "
-                    f"range for alleles={alleles} (from {uploaded!r}) - skipping"
-                )
-            continue
-
-        alt = alleles[allele_num]
+        ref, alt = ref_alt_part.split("/", 1)
 
         if idx < 5:
             logger.info(
-                "[DEBUG PARSED] uploaded=%r allele_num=%r -> chrom=%r pos=%r ref=%r alt=%r",
-                uploaded, allele_num, chrom, pos, ref, alt,
+                "[DEBUG PARSED] uploaded=%r -> chrom=%r pos=%r ref=%r alt=%r",
+                uploaded, chrom, pos, ref, alt,
             )
 
         # Transcript ID from Feature column
@@ -315,13 +279,6 @@ def append_annotations_node(state: VariantState) -> dict:
 
         # Variant class from VARIANT_CLASS column
         variant_class = str(row.get("VARIANT_CLASS", "SNV"))
-
-        # Gene symbol - needed to disambiguate SpliceAI predictions when
-        # multiple genes overlap the same position (see
-        # ParquetAnnotator.lookup_spliceai docstring - this is a
-        # correctness fix, confirmed necessary via ground-truth comparison
-        # that showed the wrong gene's prediction being returned without it)
-        gene_symbol = str(row.get("SYMBOL", ""))
 
         if idx == 0:
             logger.info(
@@ -362,8 +319,7 @@ def append_annotations_node(state: VariantState) -> dict:
                 ref=ref,
                 alt=alt,
                 transcript_id=transcript_id,
-                variant_class=variant_class,
-                gene_symbol=gene_symbol,
+                variant_class=variant_class
             )
 
             if idx < 5:
@@ -388,9 +344,6 @@ def append_annotations_node(state: VariantState) -> dict:
 
     logger.info(
         f"[{session_id}] Unparseable Uploaded_variation for {missing_uploaded_variation:,} rows"
-    )
-    logger.info(
-        f"[{session_id}] Unparseable/out-of-range ALLELE_NUM for {missing_allele_num:,} rows"
     )
 
     # Step 6: Write complete TSV
