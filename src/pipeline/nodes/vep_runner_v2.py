@@ -24,6 +24,7 @@ from src.pipeline.state import VariantState
 logger = logging.getLogger(__name__)
 
 _PLUGINS_DIR = VEP_ROOT / "Plugins"
+_LOFTEE_DIR = VEP_ROOT / "loftee"
 
 _DBNSFP_FIELDS = [
     "Ensembl_transcriptid",  # Transcript IDs for matching multi-transcript scores
@@ -37,11 +38,11 @@ _DBNSFP_FIELDS = [
     "MetaSVM_score",
 ]
 
-# LOFTEE uses different GERP mechanism per build
-# GRCh38: bigwig (.bw)   GRCh37: tabix-indexed txt.gz
+# LOFTEE GERP parameter - use gerp_file for both builds (works with .tsv.gz and .txt.gz)
+# Note: gerp_bigwig (.bw) is also valid but requires newer LOFTEE version
 _LOFTEE_GERP_FLAG = {
-    "GRCh38": "gerp_bigwig",
-    "GRCh37": "gerp_tabix",
+    "GRCh38": "gerp_file",
+    "GRCh37": "gerp_file",
 }
 
 
@@ -77,6 +78,7 @@ def _build_vep_command(
         "--species",       "homo_sapiens",
         "--assembly",      assembly,
         "--cache_version", "115",
+        "--total_length",
 
         # Input / output
         "--input_file",    str(input_vcf),
@@ -94,6 +96,17 @@ def _build_vep_command(
         "--numbers",
         "--hgvs",
         "--hgvsg",
+        "--allele_number",  # Adds ALLELE_NUM column: 1-based index into ALT
+                            # list (VCF order). Required because Uploaded_variation
+                            # for a multiallelic record ("chrom_pos_REF/ALT1/ALT2")
+                            # is IDENTICAL across all of that record's consequence
+                            # rows - Allele alone can't disambiguate which literal
+                            # ALT a row belongs to, since Allele is VEP's normalized
+                            # form (e.g. "-" or "G"), not the raw VCF ALT string.
+                            # ALLELE_NUM indexes correctly into the Uploaded_variation
+                            # allele list even though Allele doesn't match it directly -
+                            # confirmed against 5 real multiallelic variants, all indel
+                            # types (insertion/deletion/multi-base), 10/10 correct.
         "--af_gnomad",  # Add gnomAD allele frequencies from VEP cache
         "--biotype",    # Add transcript biotype (protein_coding vs lncRNA) - CRITICAL for filtering
         "--tsl",        # Transcript support level
@@ -155,6 +168,44 @@ def _build_vep_command(
     return cmd
 
 
+def _strip_variant_ids(input_vcf: Path, work_dir: Path) -> Path:
+    """
+    Write a copy of input_vcf with the ID column blanked out.
+
+    Why: VEP's Uploaded_variation column echoes the VCF ID column when
+    one is present (your VCFs have real dbSNP IDs, e.g. "rs62635297"),
+    and only synthesizes "chrom_pos_ref/alt" from the raw input line
+    when ID is ".".
+
+    That synthesized form is the LITERAL input line - confirmed
+    empirically: for a deletion at chr1:923311 (TG>T), VEP's own
+    Location/Allele columns report a shifted, normalized "923312 / -",
+    but Uploaded_variation (once ID is blanked) correctly reports
+    "chr1_923311_TG/T". append_annotations.py now parses
+    chrom/pos/ref/alt from Uploaded_variation instead of Location+Allele,
+    which is why this step exists - it also removes the need for the
+    separate bcftools REF-lookup-by-ALT step, which was the thing
+    silently failing on indels.
+
+    We write to a NEW file rather than editing input_vcf in place
+    because other pipeline steps may still depend on the real IDs.
+    """
+    stripped_vcf = work_dir / f"{input_vcf.name.split('.vcf')[0]}_noid.vcf.gz"
+
+    bcftools = shutil.which("bcftools") or "/workspace/data/envs/bcftools_env/bin/bcftools"
+
+    subprocess.run(
+        [bcftools, "annotate", "-x", "ID", "-O", "z", "-o", str(stripped_vcf), str(input_vcf)],
+        check=True, capture_output=True, text=True,
+    )
+    subprocess.run(
+        [bcftools, "index", "-t", "-f", str(stripped_vcf)],
+        check=True, capture_output=True, text=True,
+    )
+
+    return stripped_vcf
+
+
 def vep_runner_node(state: VariantState) -> dict:
     """
     Run VEP on the filtered VCF and write annotated TSV to the session work dir.
@@ -214,7 +265,11 @@ def vep_runner_node(state: VariantState) -> dict:
     work_dir.mkdir(parents=True, exist_ok=True)
     output_tsv = work_dir / f"{session_id}_vep.tsv"
 
-    cmd = _build_vep_command(input_vcf, output_tsv, genome_build)
+    # Blank the ID column before VEP sees the file - see _strip_variant_ids
+    # docstring for why. This does NOT touch input_vcf itself.
+    vep_input_vcf = _strip_variant_ids(input_vcf, work_dir)
+
+    cmd = _build_vep_command(vep_input_vcf, output_tsv, genome_build)
     logger.info(f"[{session_id}] Running VEP ({genome_build}) on {input_vcf.name} ({n_variants} variants)")
     logger.debug(f"[{session_id}] VEP command:\n  " + " \\\n  ".join(cmd))
 
@@ -262,4 +317,3 @@ def vep_runner_node(state: VariantState) -> dict:
         "vep_already_annotated": False,
         "warnings":              warnings,
     }
-

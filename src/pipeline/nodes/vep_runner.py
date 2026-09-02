@@ -78,6 +78,7 @@ def _build_vep_command(
         "--species",       "homo_sapiens",
         "--assembly",      assembly,
         "--cache_version", "115",
+        "--total_length",
 
         # Input / output
         "--input_file",    str(input_vcf),
@@ -100,6 +101,7 @@ def _build_vep_command(
         "--tsl",        # Transcript support level
         "--appris",     # APPRIS principal isoform annotation
         "--variant_class",  # SNV, insertion, deletion, etc.
+        "--allele_number",
         # NOTE: Removed --everything flag (causes large output, 20% slowdown)
         # We add back only the critical flags needed for ACMG classification
         # NOTE: Add "--merged" after installing RefSeq cache with:
