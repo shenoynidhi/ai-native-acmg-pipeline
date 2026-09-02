@@ -347,31 +347,52 @@ def _extract_zygosity_from_vcf(
                 continue
             if alt not in variant.ALT:
                 continue
-
-            # Extract GT for first sample (proband)
-            if len(variant.gt_types) == 0:
+            # Extract genotype for first sample (proband).
+            #
+            # NOTE: We deliberately do NOT use variant.gt_types here.
+            # cyvcf2 has a confirmed, long-standing upstream bug (see
+            # https://github.com/brentp/cyvcf2/issues/21, still present in
+            # 0.31.1): for multiallelic sites, a sample homozygous for the
+            # 2nd/3rd/... ALT allele is misclassified as UNKNOWN instead of
+            # HOM_ALT. Empirically confirmed on a minimal synthetic VCF
+            # (REF=A, ALT=T,G): GT=1/1 -> gt_types=UNKNOWN, GT=2/2 ->
+            # gt_types=UNKNOWN, only GT=1/2 correctly gave HET. This
+            # silently produced zygosity=None for any patient homozygous
+            # for any allele at a multiallelic site.
+            #
+            # Fix: classify zygosity directly from the raw genotype allele
+            # indices (variant.genotypes), confirmed correct in every
+            # tested case including the ones gt_types got wrong. This also
+            # correctly handles a sample not carrying the SPECIFIC alt
+            # allele being queried (returns None instead of a false
+            # "homozygous"), which gt_types alone cannot distinguish at
+            # multiallelic sites.
+            if len(variant.genotypes) == 0:
                 return None
 
-            gt_type = variant.gt_types[0]
+            genotype = variant.genotypes[0]  # [allele1, allele2, phased]
+            if genotype is None or len(genotype) < 2:
+                return None
 
-            # cyvcf2 gt_types encoding:
-            # 0 = HOM_REF (0/0)
-            # 1 = HET (0/1, 1/0)
-            # 2 = HOM_ALT (1/1)
-            # 3 = UNKNOWN (./.)
+            # variant.ALT is 0-based; VCF/GT allele numbering is 1-based
+            # for ALTs (0 = REF, 1 = ALT[0], 2 = ALT[1], ...).
+            try:
+                allele_index = 1 + list(variant.ALT).index(alt)
+            except ValueError:
+                return None  # shouldn't happen given the ALT membership check above
 
-            if gt_type == 0:
-                return None  # Homozygous reference — not a variant
-            elif gt_type == 1:
-                # Heterozygous — but check for X-chromosome males (hemizygous)
+            alleles = [a for a in genotype[:2] if isinstance(a, int)]
+            n_copies = alleles.count(allele_index)
+
+            if n_copies == 0:
+                return None  # sample doesn't carry this specific allele
+            elif n_copies == 1:
                 chrom_upper = chrom.upper().replace("CHR", "")
                 if chrom_upper in ("X", "23") and proband_sex == "Male":
                     return "hemizygous"
                 return "heterozygous"
-            elif gt_type == 2:
+            else:  # n_copies == 2
                 return "homozygous"
-            elif gt_type == 3:
-                return None  # Unknown/no-call
 
         # Variant not found in VCF
         return None
@@ -388,6 +409,7 @@ def _extract_zygosity_from_vcf(
 _gnomad_constraint_cache: Optional[Dict] = None
 _clingen_cache: Optional[Dict] = None
 _hgnc_cache: Optional[Dict] = None
+_clinvar_gene_lof_cache: Optional[Dict] = None
 
 # VCF reader cache for zygosity extraction (avoid reopening for every variant)
 _vcf_reader_cache: Dict[str, any] = {}  # {vcf_path: VCF_object}
@@ -481,6 +503,143 @@ def _load_clingen() -> Dict[str, str]:
         logger.warning(f"Could not load ClinGen validity: {e}")
 
     _clingen_cache = cache
+    return cache
+
+
+def _load_clinvar_gene_lof_summary(genes: set) -> Dict[str, Dict]:
+    """
+    Gene-level ClinVar LoF track-record summary, computed ONCE per session
+    for only the genes present in this VCF — single-threaded, before the
+    9-agent parallel fan-out. Same caching pattern as _load_gnomad_constraint /
+    _load_clingen. Agent 4 does NOT compute this and is untouched by this
+    addition; this reads the same underlying ClinVar Parquet source
+    (src/rag/parquet_retriever.py) at gene-level instead of variant-level.
+
+    For each gene, computes:
+      lof_count:    # Pathogenic/Likely_pathogenic ClinVar records with a
+                     LoF-type consequence
+      lof_fraction: lof_count / total P/LP records for the gene
+      multi_exon:   whether those LoF P/LP records span >1 distinct exon
+                     (falls back to >1 distinct protein_pos if no exon
+                     column is available — a coarser proxy, noted below)
+
+    IMPORTANT — schema uncertainty: parquet_retriever.py's own query
+    functions only ever SELECT {chrom,pos,ref,alt,gene,clnsig,stars,hgvs,
+    protein_pos,variant_id}; whether a 'consequence' or 'exon' column
+    exists in the underlying Parquet file is NOT confirmed. This function
+    introspects the schema at runtime (DESCRIBE) and only uses those
+    columns if they're actually present. If 'consequence' is absent,
+    lof_count/lof_fraction/multi_exon are left as None for ALL genes
+    (same as the pre-existing behavior — no regression, just no upgrade)
+    and a one-time warning is logged so this is easy to notice and fix
+    once the real schema is confirmed.
+    """
+    global _clinvar_gene_lof_cache
+    if _clinvar_gene_lof_cache is not None:
+        return _clinvar_gene_lof_cache
+
+    cache: Dict[str, Dict] = {}
+    if not genes:
+        _clinvar_gene_lof_cache = cache
+        return cache
+
+    try:
+        import duckdb
+        from src.rag.parquet_retriever import PARQUET_DIR
+
+        # Mirrors parquet_retriever.py's own path convention
+        # (PARQUET_DIR / f"clinvar_{build_lower}"). Genome build isn't
+        # threaded through post_process's gene-level loaders today (unlike
+        # per-variant HGVS generation, which does read genome_build from
+        # base_state) — defaulting to GRCh38 here to match this pipeline's
+        # documented default; adjust if you routinely run GRCh37.
+        genome_build = "grch38"
+        parquet_path = PARQUET_DIR / f"clinvar_{genome_build}"
+
+        if not parquet_path.exists():
+            logger.warning(f"ClinVar Parquet not found for gene-level LoF summary: {parquet_path}")
+            _clinvar_gene_lof_cache = cache
+            return cache
+
+        conn = duckdb.connect(":memory:")
+        glob_path = f"{parquet_path}/**/*.parquet"
+
+        # Introspect available columns rather than assuming
+        available_cols = {
+            row[0] for row in conn.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{glob_path}') LIMIT 0"
+            ).fetchall()
+        }
+        has_consequence = "consequence" in available_cols
+        has_exon = "exon" in available_cols
+
+        if not has_consequence:
+            logger.warning(
+                "ClinVar Parquet has no 'consequence' column — cannot determine which "
+                "P/LP records are LoF-type. gene_clinvar_lof_fraction/count/multi_exon "
+                "will remain None for all genes (same as before this addition). "
+                "Run `DESCRIBE SELECT * FROM read_parquet(...)` on the ClinVar Parquet "
+                "to see actual available columns and adjust this function."
+            )
+            _clinvar_gene_lof_cache = cache
+            return cache
+
+        select_cols = "gene, clnsig, consequence"
+        if has_exon:
+            select_cols += ", exon"
+        else:
+            select_cols += ", protein_pos"  # coarser multi-exon proxy fallback
+
+        gene_list_sql = "', '".join(g.replace("'", "''") for g in genes)
+
+        query = f"""
+            SELECT {select_cols}
+            FROM read_parquet('{glob_path}')
+            WHERE gene IN ('{gene_list_sql}')
+              AND (clnsig ILIKE '%Pathogenic%' OR clnsig ILIKE '%Likely_pathogenic%'
+                   OR clnsig ILIKE '%Likely pathogenic%')
+              AND clnsig NOT ILIKE '%Conflicting%'
+              AND clnsig NOT ILIKE '%Benign%'
+        """
+        rows = conn.execute(query).fetchall()
+        col_names = [d[0] for d in conn.description]
+
+        LOF_CONSEQUENCES_SET = {
+            "stop_gained", "frameshift_variant",
+            "splice_acceptor_variant", "splice_donor_variant",
+        }
+
+        by_gene: Dict[str, list] = {}
+        for r in rows:
+            rec = dict(zip(col_names, r))
+            by_gene.setdefault(rec["gene"], []).append(rec)
+
+        for gene, recs in by_gene.items():
+            total_plp = len(recs)
+            if total_plp == 0:
+                continue
+            lof_recs = [r for r in recs if (r.get("consequence") or "") in LOF_CONSEQUENCES_SET]
+            lof_count = len(lof_recs)
+            if has_exon:
+                spread_key = "exon"
+            else:
+                spread_key = "protein_pos"
+            distinct_positions = {r.get(spread_key) for r in lof_recs if r.get(spread_key) is not None}
+            cache[gene] = {
+                "lof_count": lof_count,
+                "lof_fraction": lof_count / total_plp,
+                "multi_exon": len(distinct_positions) > 1,
+            }
+
+        logger.info(
+            f"Computed gene-level ClinVar LoF summary for {len(cache)} of {len(genes)} "
+            f"genes in this VCF (exon column available: {has_exon})."
+        )
+
+    except Exception as e:
+        logger.warning(f"Could not compute gene-level ClinVar LoF summary: {e}")
+
+    _clinvar_gene_lof_cache = cache
     return cache
 
 
@@ -716,6 +875,7 @@ def _parse_vep_row(
     base_state: VariantState,
     gnomad_constraint: Dict,
     clingen: Dict,
+    clinvar_gene_lof: Dict,
 ) -> Optional[VariantState]:
     """
     Parse one VEP TSV row into a VariantState.
@@ -767,6 +927,25 @@ def _parse_vep_row(
     chrom, pos_int, ref, alt = None, None, None, None
     variant_id = None  # Initialize to avoid UnboundLocalError
 
+    # ALLELE_NUM (from --allele_number in vep_runner.py) is a 1-based index
+    # into the ALT allele list embedded in Uploaded_variation. Using it here
+    # instead of the VEP "Allele" column fixes the same problem already
+    # fixed in append_annotations.py (handoff bug #5): "Allele" is VEP's
+    # normalized form (e.g. "-" for a deletion) and does not reliably map
+    # back to the literal VCF ALT for indels or multiallelic sites.
+    #
+    # ALLELE_NUM may be ABSENT if this TSV came from an externally-annotated
+    # VCF that bypassed vep_runner_node entirely (see graph.py's
+    # _should_run_vep / vep_already_annotated) - such input was never run
+    # with --allele_number. We do NOT hard-fail on that; we fall back to the
+    # pre-existing Allele-based behavior, unchanged, so that path keeps
+    # working exactly as it did before this patch.
+    allele_num_raw = row.get("ALLELE_NUM", "")
+    try:
+        allele_num = int(allele_num_raw)
+    except (ValueError, TypeError):
+        allele_num = None
+
     # Try parsing Uploaded_variation first (format: chr1_12345_A/G)
     if "_" in uploaded and "/" in uploaded:
         parts = uploaded.split("_")
@@ -779,16 +958,24 @@ def _parse_vep_row(
                 if "." not in parts[1]:
                     chrom = parts[0]
                     pos_int = int(parts[1])
-                    ref_alt = parts[2].split("/")
+                    alleles = parts[2].split("/")
                 else:
                     # Alternate contig format: NT_187361.1_40583_A/G
                     # Chromosome is parts[0]_parts[1], position is parts[2]
                     chrom = f"{parts[0]}_{parts[1]}"
                     pos_int = int(parts[2])
-                    ref_alt = parts[3].split("/") if len(parts) > 3 else []
+                    alleles = parts[3].split("/") if len(parts) > 3 else []
 
-                ref = ref_alt[0] if ref_alt else "."
-                alt = allele
+                ref = alleles[0] if alleles else "."
+
+                if allele_num is not None and 0 < allele_num < len(alleles):
+                    # Correct: literal ALT indexed straight out of
+                    # Uploaded_variation, same mechanism as append_annotations.py
+                    alt = alleles[allele_num]
+                else:
+                    # Fallback: unchanged prior behavior
+                    alt = allele
+
                 variant_id = f"{chrom}:{pos_int}:{ref}:{alt}"
             except (ValueError, IndexError) as e:
                 logger.debug(f"[{session_id}] Could not parse uploaded_variation '{uploaded}': {e}")
@@ -871,6 +1058,9 @@ def _parse_vep_row(
     lof_tag     = _str(row.get("LoF", "") or "")
     lof_filter  = _str(row.get("LoF_filter", "") or "")
     lof_flags   = _str(row.get("LoF_flags", "") or "")
+    lof_info    = _str(row.get("LoF_info", "") or "")  # raw KEY:VALUE,... string —
+                                                          # used by Agent 2 for de-novo
+                                                          # splice-rescue-probability check
     is_loftee_hc = lof_tag == "HC"
 
     # Format human-readable LoF status
@@ -908,6 +1098,7 @@ def _parse_vep_row(
     loeuf = constraint.get("loeuf")
     z     = constraint.get("z")
     clingen_val = clingen.get(gene)
+    gene_lof_summary = clinvar_gene_lof.get(gene, {})
 
     # Extract zygosity from VCF GT field
     zygosity = None
@@ -1000,6 +1191,7 @@ def _parse_vep_row(
         "is_loftee_hc":           is_loftee_hc,
         "lof_filter":             lof_filter,
         "lof_flags":              lof_flags,
+        "lof_info":               lof_info,
         "lof_status":             lof_status,
         "max_spliceai":           spliceai,
         "revel_score":            revel,
@@ -1024,9 +1216,14 @@ def _parse_vep_row(
         "gene_gnomad_pli":          pli,
         "gene_gnomad_loeuf":        loeuf,
         "gene_gnomad_zscore":       z,
-        # These require ClinVar tabix lookups — done by Agent 4
-        "gene_clinvar_missense_fraction": None,
-        "gene_clinvar_lof_fraction":      None,
+        # Gene-level ClinVar LoF track-record summary — computed ONCE per gene,
+        # single-threaded, in this node (see _load_clinvar_gene_lof_summary below),
+        # NOT by an agent at runtime. Fixes a pre-existing gap where these were
+        # hardcoded None and never actually populated by anything.
+        "gene_clinvar_missense_fraction": None,  # not computed yet — separate from LoF summary
+        "gene_clinvar_lof_fraction":      gene_lof_summary.get("lof_fraction"),
+        "gene_clinvar_lof_count":         gene_lof_summary.get("lof_count"),
+        "gene_clinvar_lof_multi_exon":    gene_lof_summary.get("multi_exon"),
         # Orphanet inheritance — done by Agent 9 (needs Orphanet XML)
         "gene_orphanet_inheritance": None,
     })
@@ -1072,6 +1269,8 @@ def post_process_node(state: VariantState) -> dict:
     # Load gene-level reference data (cached after first call)
     gnomad_constraint = _load_gnomad_constraint()
     clingen           = _load_clingen()
+    # gene-level ClinVar LoF summary is loaded below, once we know which
+    # genes are actually in this VCF (see after the pandas pre-filter step)
 
     # ------------------------------------------------------------------
     # Parse VEP TSV — skip comment lines starting with ##
@@ -1174,6 +1373,11 @@ def post_process_node(state: VariantState) -> dict:
                 reader = csv.DictReader(lines, delimiter="\t")
                 rows = list(reader)
 
+            # csv.DictReader path: compute gene set from all rows (no pre-filter
+            # step available here) before parsing.
+            genes_in_vcf = {r.get("SYMBOL", "").strip() for r in rows} - {"", "nan", "NA"}
+            clinvar_gene_lof = _load_clinvar_gene_lof_summary(genes_in_vcf)
+
         # OPTIMIZATION: If using pandas, apply filters BEFORE parsing to reduce rows
         # This reduces 2.8M rows → ~80k rows BEFORE expensive _parse_vep_row() calls
         # Speedup: 28 min → 3 min (10× faster!)
@@ -1227,6 +1431,17 @@ def post_process_node(state: VariantState) -> dict:
             logger.info(f"[{session_id}] Pre-filtering complete: {original_row_count} → {len(rows)} rows to parse")
             logger.info(f"[{session_id}] Parsing {len(rows)} filtered rows (this will take ~{len(rows)//1000} min)...")
 
+            # Gene-level ClinVar LoF summary — computed once for only the genes
+            # actually present in this (already-filtered) VCF, single-threaded,
+            # before any agent runs. See _load_clinvar_gene_lof_summary().
+            if 'SYMBOL' in df.columns:
+                genes_in_vcf = set(df['SYMBOL'].dropna().unique()) - {'', 'nan', 'NA'}
+            else:
+                genes_in_vcf = set()
+            clinvar_gene_lof = _load_clinvar_gene_lof_summary(genes_in_vcf)
+        # else: clinvar_gene_lof was already set in the csv.DictReader fallback
+        # branch above (same condition, De Morgan's law) — do not overwrite it here.
+
         # Process all rows (same logic for both pandas and csv.DictReader)
         row_count = 0
         filtered_counts = {
@@ -1244,7 +1459,7 @@ def post_process_node(state: VariantState) -> dict:
                 row = {k.strip(): v.strip() for k, v in row.items() if k}
 
             variant_state = _parse_vep_row(
-                row, session_id, state, gnomad_constraint, clingen
+                row, session_id, state, gnomad_constraint, clingen, clinvar_gene_lof
             )
             if variant_state is None:
                 filtered_counts["parse_returned_none"] += 1
@@ -1366,4 +1581,3 @@ def post_process_node(state: VariantState) -> dict:
     update["parsed_variants_count"] = len(parsed_variants)
     update["parsed_variants"] = parsed_variants
     return update
-
